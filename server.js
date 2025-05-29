@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const DEFAULT_ICON = 'https://cdn.glitch.global/9f8d7510-a6b7-4b23-99f3-77ca71e653bf/Noicon.png?v=1748544805464';
+const DEFAULT_ICON = "https://spangled-mountainous-study.glitch.me/icon.png";
 
 const app = express();
 const server = http.createServer(app);
