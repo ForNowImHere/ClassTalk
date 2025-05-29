@@ -1,70 +1,125 @@
-const socket = io();
-const peer = new Peer(); // Create a PeerJS object for WebRTC
+const express = require('express');
+const http = require('http');
+const { v4: uuidv4 } = require('uuid');
+const socketIo = require('socket.io');
 
-let myVideoStream;
-let myPeerId;
-let currentRoom = null;
-const roomStatusElement = document.getElementById('room-status');
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 
-// Handle creating a new room
-document.getElementById('create-room-button').addEventListener('click', () => {
-    // Request the server to create a new room (redirects to /join/{roomCode})
-    window.location.href = '/create';
+app.get('/', (req, res) => {
+    const newRoom = uuidv4();
+    res.redirect(`/room/${newRoom}`);
 });
 
-// Handle joining an existing room
-document.getElementById('join-room-button').addEventListener('click', () => {
-    const roomCode = document.getElementById('room-code-input').value;
-    if (roomCode) {
-        window.location.href = `/join/${roomCode}`; // Redirect to the room
-    } else {
-        roomStatusElement.textContent = 'Please enter a room code.';
-    }
+app.get('/room/:roomId', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Meet Room</title>
+    <style>
+        body { margin: 0; background: #111; color: white; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; background: #222; }
+        #chat { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 10px; }
+    </style>
+</head>
+<body>
+    <canvas id="gridCanvas"></canvas>
+    <div id="chat">
+        <input id="chatInput" placeholder="Say something..." />
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const roomId = location.pathname.split('/').pop();
+        const canvas = document.getElementById('gridCanvas');
+        const ctx = canvas.getContext('2d');
+        const chatInput = document.getElementById('chatInput');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const user = {
+            name: prompt('Enter your name'),
+            image: \`https://robohash.org/\${Math.random().toString().slice(2)}\`
+        };
+
+        const peers = {};
+
+        socket.emit('join-room', { roomId, user });
+
+        socket.on('user-joined', ({ id, user }) => {
+            peers[id] = user;
+            drawGrid();
+        });
+
+        socket.on('existing-users', (ids) => {
+            for (const id of ids) {
+                peers[id] = { name: 'Unknown', image: 'https://via.placeholder.com/64' };
+            }
+            drawGrid();
+        });
+
+        socket.on('user-left', ({ id }) => {
+            delete peers[id];
+            drawGrid();
+        });
+
+        socket.on('chat-message', ({ from, msg }) => {
+            console.log(\`\${peers[from]?.name || from}: \${msg}\`);
+        });
+
+        chatInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                socket.emit('chat-message', chatInput.value);
+                chatInput.value = '';
+            }
+        });
+
+        function drawGrid() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const keys = Object.keys(peers);
+            keys.push('me');
+
+            const cols = Math.ceil(Math.sqrt(keys.length));
+            const size = canvas.width / cols;
+
+            keys.forEach((id, i) => {
+                const x = (i % cols) * size;
+                const y = Math.floor(i / cols) * size;
+                const name = id === 'me' ? user.name : peers[id]?.name || 'Unknown';
+                const image = new Image();
+                image.src = id === 'me' ? user.image : peers[id]?.image;
+                image.onload = () => {
+                    ctx.drawImage(image, x + 10, y + 10, size - 20, size - 20);
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(name, x + 10, y + size - 10);
+                };
+            });
+        }
+    </script>
+</body>
+</html>
+    `);
 });
 
-// Initialize webcam and audio
-navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-        myVideoStream = stream;
+io.on('connection', (socket) => {
+    socket.on('join-room', ({ roomId, user }) => {
+        socket.join(roomId);
+        socket.to(roomId).emit('user-joined', { id: socket.id, user });
 
-        // Get the room code from the URL
-        const urlParams = window.location.pathname.split('/');
-        const roomCode = urlParams[urlParams.length - 1];  // Room code comes from URL path
-        
-        // Emit the user joining the room with the room code
-        socket.emit('join-room', roomCode, peer.id);
+        const clients = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+        const otherUsers = clients.filter(id => id !== socket.id);
+        socket.emit('existing-users', otherUsers);
 
-        // Display my video stream in the local video element
-        document.getElementById('my-video').srcObject = stream;
-    })
-    .catch(err => {
-        console.log('Error accessing media devices:', err);
+        socket.on('chat-message', msg => io.to(roomId).emit('chat-message', { from: socket.id, msg }));
+
+        socket.on('disconnect', () => {
+            socket.to(roomId).emit('user-left', { id: socket.id });
+        });
     });
-
-// Handle incoming messages in the room
-socket.on('message', message => {
-    console.log('New message:', message);
-    // You could display the messages in a chat window here
 });
 
-// Notify user when they've successfully joined the room
-socket.on('room-joined', (roomCode) => {
-    roomStatusElement.textContent = `You have successfully joined room: ${roomCode}`;
-});
-
-// Notify user if the room is full
-socket.on('room-full', (roomCode) => {
-    roomStatusElement.textContent = `Sorry, room ${roomCode} is full.`;
-});
-
-// Notify when a user connects
-socket.on('user-connected', (userId) => {
-    console.log(`User ${userId} connected`);
-    // Handle new peer connection here
-});
-
-// Notify when a user disconnects
-socket.on('user-disconnected', (userId) => {
-    console.log(`User ${userId} disconnected`);
-    // Handle peer disconnection here
+server.listen(3000, () => {
+    console.log('✅ Live server on http://localhost:3000');
 });
