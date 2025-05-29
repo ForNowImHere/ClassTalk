@@ -1,25 +1,175 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Chat Room</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        #videos {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .video-container {
+            position: relative;
+            margin: 5px;
+        }
+        .video-container video, .video-container img {
+            width: 200px;
+            height: 150px;
+            border: 1px solid #ccc;
+        }
+        .video-container .name {
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            padding: 2px 5px;
+            font-size: 12px;
+        }
+        #chat {
+            margin-top: 10px;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            height: 100px;
+            overflow-y: scroll;
+            padding: 5px;
+        }
+    </style>
 </head>
 <body>
-    <div id="main-container">
-        <div class="video-container">
-            <video id="my-video" autoplay muted></video>
-            <video id="remote-video" autoplay></video>
-        </div>
-        <div id="chat-container">
-            <textarea id="chat-box" placeholder="Send a message..."></textarea>
-            <button onclick="sendMessage()">Send</button>
-        </div>
+    <h2>Room: <span id="room-id"></span></h2>
+    <div id="videos"></div>
+    <div id="chat">
+        <div id="messages"></div>
+        <input type="text" id="chatInput" placeholder="Type a message..." />
+        <button onclick="sendMessage()">Send</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
-    <script src="room.js"></script>
+    <script>
+        const socket = io();
+        const roomId = window.location.pathname.split('/').pop();
+        document.getElementById('room-id').textContent = roomId;
+
+        const user = JSON.parse(localStorage.getItem('user')) || { name: 'Anonymous', profilePic: '' };
+        const peers = {};
+        const videoGrid = document.getElementById('videos');
+        const messages = document.getElementById('messages');
+
+        let localStream;
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+            localStream = stream;
+            addVideoStream('Me', stream, user.profilePic);
+
+            socket.emit('join-room', { roomId, user });
+
+            socket.on('existing-users', users => {
+                users.forEach(({ id, user: remoteUser }) => {
+                    const peer = createPeer(id, stream);
+                    peers[id] = peer;
+                });
+            });
+
+            socket.on('user-joined', ({ id, user: remoteUser }) => {
+                const peer = createPeer(id, stream);
+                peers[id] = peer;
+            });
+
+            socket.on('offer', async ({ offer, from }) => {
+                const peer = createPeer(from, stream, true);
+                peers[from] = peer;
+                await peer.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+                socket.emit('answer', { answer, to: from });
+            });
+
+            socket.on('answer', ({ answer, from }) => {
+                peers[from].setRemoteDescription(new RTCSessionDescription(answer));
+            });
+
+            socket.on('ice-candidate', ({ candidate, from }) => {
+                if (peers[from]) {
+                    peers[from].addIceCandidate(new RTCIceCandidate(candidate));
+                }
+            });
+
+            socket.on('user-left', id => {
+                if (peers[id]) {
+                    peers[id].close();
+                    delete peers[id];
+                }
+                const video = document.getElementById(id);
+                if (video) video.parentElement.remove();
+            });
+
+            socket.on('chat-message', ({ message, user }) => {
+                const msg = document.createElement('div');
+                msg.textContent = `${user.name}: ${message}`;
+                messages.appendChild(msg);
+                messages.scrollTop = messages.scrollHeight;
+            });
+
+            function createPeer(id, stream, isAnswer = false) {
+                const peer = new RTCPeerConnection();
+                stream.getTracks().forEach(track => peer.addTrack(track, stream));
+
+                peer.onicecandidate = e => {
+                    if (e.candidate) {
+                        socket.emit('ice-candidate', { candidate: e.candidate, to: id });
+                    }
+                };
+
+                peer.ontrack = e => {
+                    const [remoteStream] = e.streams;
+                    addVideoStream(id, remoteStream);
+                };
+
+                if (!isAnswer) {
+                    peer.createOffer().then(offer => {
+                        peer.setLocalDescription(offer);
+                        socket.emit('offer', { offer, to: id });
+                    });
+                }
+
+                return peer;
+            }
+
+            function addVideoStream(id, stream, profilePic = '') {
+                const container = document.createElement('div');
+                container.className = 'video-container';
+
+                if (stream) {
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    video.autoplay = true;
+                    video.id = id;
+                    container.appendChild(video);
+                } else if (profilePic) {
+                    const img = document.createElement('img');
+                    img.src = profilePic;
+                    img.id = id;
+                    container.appendChild(img);
+                }
+
+                const nameTag = document.createElement('div');
+                nameTag.className = 'name';
+                nameTag.textContent = id === 'Me' ? user.name : id;
+                container.appendChild(nameTag);
+
+                videoGrid.appendChild(container);
+            }
+        });
+
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value;
+            if (message.trim() !== '') {
+                socket.emit('chat-message', { message });
+                input.value = '';
+            }
+        }
+    </script>
 </body>
 </html>
