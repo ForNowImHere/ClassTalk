@@ -2,7 +2,11 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const DEFAULT_ICON = "https://spangled-mountainous-study.glitch.me/icon.png";
+const DEFAULT_ICON = "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png?v=1748558657344",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png?v=1748558650328",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png?v=1748558651617"
+];
 
 const app = express();
 const server = http.createServer(app);
