@@ -28,7 +28,7 @@ app.get('/', (req, res) => {
 
 // Serve the main room page (single HTML)
 app.get('/room/:roomId', (req, res) => {
-  res.send(
+  res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -297,8 +297,8 @@ io.on('connection', (socket) => {
       if (kickedSocket) {
         kickedSocket.emit('kicked');
         kickedSocket.disconnect();
-      }
-    });
+      `);
+    ]);
 
     // Handle disconnect
     socket.on('disconnect', () => {
