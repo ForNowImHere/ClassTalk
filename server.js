@@ -297,7 +297,7 @@ io.on('connection', (socket) => {
       if (kickedSocket) {
         kickedSocket.emit('kicked');
         kickedSocket.disconnect();
-      );
+      };
     ]);
 
     // Handle disconnect
