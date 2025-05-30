@@ -254,8 +254,8 @@ app.get('/room/:roomId', (req, res) => {
 </script>
 </body>
 </html>  
-  );
-});
+  `);
+]);
 
 // Server state in memory
 const rooms = {}; // roomId => { users: [{id, name, icon, isAdmin}], adminId }
