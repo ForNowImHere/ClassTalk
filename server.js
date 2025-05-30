@@ -69,7 +69,6 @@ app.get('/room/:roomId', (req, res) => {
   userIcon = icons[Math.floor(Math.random() * icons.length)];
   }
 
-
   // Elements
   const usersDiv = document.getElementById('users');
 
@@ -324,4 +323,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(Voice chat server listening on port ${PORT})); 
+server.listen(PORT, () => console.log(Voice chat server listening on port ${PORT}))
