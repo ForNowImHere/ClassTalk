@@ -23,7 +23,7 @@ function generateRoomId() {
 // Redirect root to a new room
 app.get('/', (req, res) => {
   const roomId = generateRoomId();
-  res.redirect(/room/${roomId});
+  res.redirect(`/room/${roomId}`);
 });
 
 // Serve the main room page (single HTML)
@@ -297,7 +297,7 @@ io.on('connection', (socket) => {
       if (kickedSocket) {
         kickedSocket.emit('kicked');
         kickedSocket.disconnect();
-      `);
+      );
     ]);
 
     // Handle disconnect
