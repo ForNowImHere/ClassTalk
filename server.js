@@ -65,9 +65,9 @@ app.get('/room/:roomId', (req, res) => {
   let userIcon = prompt("Enter icon URL (leave blank for default):", "") || "";
 
   if (!userIcon) {
-  const icons = ${JSON.stringify(DEFAULT_ICONS)};
+  const icons = ${JSON.stringify(DEFAULT_ICON)};
   userIcon = icons[Math.floor(Math.random() * icons.length)];
-}
+  }
 
 
   // Elements
