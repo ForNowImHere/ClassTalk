@@ -2,7 +2,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const DEFAULT_ICON = "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
+const DEFAULT_ICON = [
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
   "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png?v=1748558657344",
   "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png?v=1748558650328",
   "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png?v=1748558651617"
@@ -63,7 +64,11 @@ app.get('/room/:roomId', (req, res) => {
   const userName = prompt("Enter your name:", "Guest") || "Guest";
   let userIcon = prompt("Enter icon URL (leave blank for default):", "") || "";
 
-  if (!userIcon) userIcon = "${DEFAULT_ICON}";
+  if (!userIcon) {
+  const icons = ${JSON.stringify(DEFAULT_ICONS)};
+  userIcon = icons[Math.floor(Math.random() * icons.length)];
+}
+
 
   // Elements
   const usersDiv = document.getElementById('users');
