@@ -17,18 +17,18 @@ function generateRoomId() {
   const charset = 'abcdefghijklmnopqrstuvwxyz';
   const part = (len) =>
     Array.from({ length: len }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
-  return `${part(3)}-${part(4)}-${part(3)}`;
+  return ${part(3)}-${part(4)}-${part(3)};
 }
 
 // Redirect root to a new room
 app.get('/', (req, res) => {
   const roomId = generateRoomId();
-  res.redirect(`/room/${roomId}`);
+  res.redirect(/room/${roomId});
 });
 
 // Serve the main room page (single HTML)
 app.get('/room/:roomId', (req, res) => {
-  res.send(`
+  res.send(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -129,12 +129,12 @@ app.get('/room/:roomId', (req, res) => {
       userEl.className = 'user';
       userEl.id = 'user-' + u.id;
 
-      userEl.innerHTML = \`
+      userEl.innerHTML = \
         <img src="\${u.icon || '${DEFAULT_ICON}'}" alt="icon" />
         <div class="name">\${u.name} \${u.isAdmin ? '<span class="admin">(admin)</span>' : ''}</div>
         <div class="dots" id="dots-\${u.id}">·····</div>
         \${isAdmin && u.id !== userId ? '<button class="kick" data-id="' + u.id + '">Kick</button>' : ''}
-      \`;
+      \;
 
       usersDiv.appendChild(userEl);
 
@@ -218,92 +218,110 @@ app.get('/room/:roomId', (req, res) => {
       remoteAnalyser.fftSize = 256;
       const remoteDataArray = new Uint8Array(remoteAnalyser.frequencyBinCount);
 
-      const remoteSource = remoteAudioCtx.createMediaStreamSource(audioEl.srcObject);
-      remoteSource.connect(remoteAnalyser);
+      const source = remoteAudioCtx.createMediaStreamSource(event.streams[0]);
+      source.connect(remoteAnalyser);
 
       function updateRemoteVolume() {
         remoteAnalyser.getByteFrequencyData(remoteDataArray);
-        const sum = remoteDataArray.reduce((a, b) => a + b, 0);
+        const sum = remoteDataArray.reduce((a,b) => a + b, 0);
         const avg = sum / remoteDataArray.length;
         const dotsCount = Math.min(5, Math.floor(avg / 30));
         const dots = "·".repeat(5 - dotsCount) + "●".repeat(dotsCount);
-
-        const remoteDots = document.getElementById('dots-' + peerId);
-        if (remoteDots) remoteDots.textContent = dots;
-
+        const dotsEl = document.getElementById('dots-' + peerId);
+        if (dotsEl) dotsEl.textContent = dots;
         requestAnimationFrame(updateRemoteVolume);
       }
-
       updateRemoteVolume();
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit('signal', { to: peerId, data: event.candidate });
+        socket.emit('signal', { to: peerId, data: { candidate: event.candidate } });
       }
     };
 
     if (isInitiator) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      socket.emit('signal', { to: peerId, data: offer });
+      socket.emit('signal', { to: peerId, data: pc.localDescription });
     }
   }
+
+  // Before unload close
+  window.addEventListener('beforeunload', () => {
+    socket.disconnect();
+  });
 })();
 </script>
 </body>
-</html>
-`);
+</html>  
+  );
 });
 
-const usersInRoom = {}; // roomId -> array of users
+// Server state in memory
+const rooms = {}; // roomId => { users: [{id, name, icon, isAdmin}], adminId }
 
 io.on('connection', (socket) => {
   socket.on('join-room', ({ roomId, name, icon }) => {
+    if (!rooms[roomId]) rooms[roomId] = { users: [], adminId: null };
+
+    const room = rooms[roomId];
+    const userId = socket.id;
+
+    // Assign admin if none
+    if (!room.adminId) room.adminId = userId;
+
+    const isAdmin = room.adminId === userId;
+
+    room.users.push({ id: userId, name: name || 'Guest', icon: icon || DEFAULT_ICON, isAdmin });
+
     socket.join(roomId);
-    socket.roomId = roomId;
-    socket.userId = socket.id;
 
-    if (!usersInRoom[roomId]) usersInRoom[roomId] = [];
+    // Notify user their id
+    socket.emit('your-id', userId);
 
-    const isAdmin = usersInRoom[roomId].length === 0;
-    const userInfo = { id: socket.id, name, icon, isAdmin };
-    usersInRoom[roomId].push(userInfo);
+    // Broadcast updated user list
+    io.to(roomId).emit('user-list', room.users);
 
-    io.to(roomId).emit('user-list', usersInRoom[roomId]);
-    socket.emit('your-id', socket.id);
+    // Notify others new user joined
+    socket.to(roomId).emit('user-joined', { id: userId, name, icon, isAdmin });
 
-    socket.to(roomId).emit('user-joined', userInfo);
-  });
+    // Relay signaling messages
+    socket.on('signal', ({ to, data }) => {
+      io.to(to).emit('signal', { from: socket.id, data });
+    });
 
-  socket.on('signal', ({ to, data }) => {
-    io.to(to).emit('signal', { from: socket.id, data });
-  });
-
-  socket.on('kick-user', (targetId) => {
-    const roomId = socket.roomId;
-    const kicker = usersInRoom[roomId]?.find(u => u.id === socket.id);
-    if (kicker?.isAdmin) {
-      const targetSocket = io.sockets.sockets.get(targetId);
-      if (targetSocket) {
-        targetSocket.emit('kick');
-        targetSocket.disconnect();
+    // Kick user event (admin only)
+    socket.on('kick-user', (kickId) => {
+      if (socket.id !== room.adminId) return;
+      const kickedSocket = io.sockets.sockets.get(kickId);
+      if (kickedSocket) {
+        kickedSocket.emit('kicked');
+        kickedSocket.disconnect();
       }
-    }
-  });
+    });
 
-  socket.on('disconnect', () => {
-    const roomId = socket.roomId;
-    if (!roomId) return;
+    // Handle disconnect
+    socket.on('disconnect', () => {
+      if (!rooms[roomId]) return;
+      room.users = room.users.filter(u => u.id !== userId);
 
-    usersInRoom[roomId] = usersInRoom[roomId]?.filter(u => u.id !== socket.id);
-    io.to(roomId).emit('user-left', socket.id);
-    io.to(roomId).emit('user-list', usersInRoom[roomId]);
+      // If admin left, assign new admin (oldest user)
+      if (room.adminId === userId) {
+        if (room.users.length > 0) {
+          room.adminId = room.users[0].id;
+          room.users[0].isAdmin = true;
+        } else {
+          delete rooms[roomId];
+          return;
+        }
+      }
 
-    if (usersInRoom[roomId]?.length === 0) delete usersInRoom[roomId];
+      io.to(roomId).emit('user-list', room.users);
+      io.to(roomId).emit('user-left', userId);
+    });
   });
 });
 
-server.listen(3000, () => {
-  console.log('Server running on http://localhost:3000');
-});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(Voice chat server listening on port ${PORT})); 
