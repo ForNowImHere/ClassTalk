@@ -1,64 +1,53 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-
-const DEFAULT_ICON = [
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png?v=1748558657344",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png?v=1748558650328",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png?v=1748558651617"
-];
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
 
-// 🔴 IMPORTANT: allow big images
+// IMPORTANT: allow large binary payloads
 const io = new Server(server, {
-  maxHttpBufferSize: 10 * 1024 * 1024 // 10MB
+  maxHttpBufferSize: 50 * 1024 * 1024 // 50MB
 });
 
-function generateRoomId() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz';
-  const part = len =>
-    Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  return `${part(3)}-${part(4)}-${part(3)}`;
+const rooms = {};
+
+function makeRoom() {
+  return Math.random().toString(36).slice(2, 6) + "-" +
+         Math.random().toString(36).slice(2, 6);
 }
 
-// redirect to room
-app.get('/', (req, res) => {
-  res.redirect(`/room/${generateRoomId()}`);
+app.get("/", (req, res) => {
+  res.redirect("/room/" + makeRoom());
 });
 
-// ===== SINGLE HTML PAGE =====
-app.get('/room/:roomId', (req, res) => {
+app.get("/room/:id", (req, res) => {
   res.send(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Room ${req.params.roomId}</title>
+<title>Room ${req.params.id}</title>
 <style>
-body{background:#111;color:white;font-family:Arial;margin:0}
-#users{display:flex;gap:10px;flex-wrap:wrap;padding:10px}
+body{margin:0;background:#111;color:#fff;font-family:Arial}
+#users{display:flex;gap:10px;padding:10px;flex-wrap:wrap}
 .user{background:#222;padding:8px;border-radius:8px;width:140px;text-align:center}
-.user img{width:48px;height:48px;border-radius:50%}
-.admin{color:gold}
-video{width:240px;border-radius:8px}
-#chat{position:fixed;right:10px;bottom:10px;width:300px;background:#222;padding:10px;border-radius:10px}
-#msgs{height:200px;overflow-y:auto;margin-bottom:6px}
-textarea{width:100%}
-img.chatimg{max-width:100%;border-radius:6px;margin-top:4px}
+video{width:240px;border-radius:8px;margin:6px}
+#chat{position:fixed;right:10px;bottom:10px;width:320px;background:#222;padding:10px;border-radius:10px}
+#msgs{height:220px;overflow-y:auto}
+textarea{width:100%;resize:none}
+.chatimg{max-width:100%;border-radius:6px;margin:4px 0}
 </style>
 </head>
 <body>
 
-<h2 style="margin:10px">Room ${req.params.roomId}</h2>
+<h3 style="margin:10px">Room ${req.params.id}</h3>
 <div id="users"></div>
 <video id="me" autoplay muted></video>
 
 <div id="chat">
   <div id="msgs"></div>
-  <textarea id="msg" placeholder="type..."></textarea>
-  <input type="file" id="img" accept="image/*">
+  <textarea id="msg" placeholder="message"></textarea>
+  <input type="file" id="file">
   <button id="send">Send</button>
 </div>
 
@@ -66,47 +55,34 @@ img.chatimg{max-width:100%;border-radius:6px;margin-top:4px}
 <script>
 (async()=>{
 const socket = io();
-const roomId="${req.params.roomId}";
-let myId=null, peers={};
+const roomId="${req.params.id}";
+let myId;
+let peers={};
 
 const name=prompt("name","Guest")||"Guest";
-let icon=prompt("icon url (blank=random)","")||"";
-if(!icon){
-  const icons=${JSON.stringify(DEFAULT_ICON)};
-  icon=icons[Math.floor(Math.random()*icons.length)];
-}
+socket.emit("join",{roomId,name});
 
-socket.emit("join-room",{roomId,name,icon});
-
-// media
+// MEDIA
 const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
 document.getElementById("me").srcObject=stream;
 
 const rtc={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
 
-socket.on("your-id",id=>myId=id);
+socket.on("id",id=>myId=id);
 
-// users
-socket.on("user-list",users=>{
+// USERS
+socket.on("users",list=>{
   const u=document.getElementById("users");
   u.innerHTML="";
-  users.forEach(x=>{
+  list.forEach(x=>{
     const d=document.createElement("div");
     d.className="user";
-    d.innerHTML=\`
-      <img src="\${x.icon}">
-      <div>\${x.name} \${x.isAdmin?"<span class='admin'>(admin)</span>":""}</div>
-    \`;
+    d.textContent=x.name;
     u.appendChild(d);
   });
 });
 
-socket.on("user-joined",u=>connect(u.id,true));
-socket.on("user-left",id=>{
-  if(peers[id]) peers[id].close();
-});
-
-// webrtc
+// WEBRTC
 async function connect(id,init){
   const pc=new RTCPeerConnection(rtc);
   peers[id]=pc;
@@ -134,6 +110,11 @@ async function connect(id,init){
   }
 }
 
+socket.on("join-peer",d=>connect(d.id,true));
+socket.on("leave-peer",id=>{
+  if(peers[id]) peers[id].close();
+});
+
 socket.on("signal",async({from,data})=>{
   if(!peers[from]) await connect(from,false);
   const pc=peers[from];
@@ -149,84 +130,112 @@ socket.on("signal",async({from,data})=>{
   }
 });
 
-// ===== CHAT =====
-const msgs=document.getElementById("msgs");
-document.getElementById("send").onclick=()=>{
-  const t=document.getElementById("msg").value.trim();
-  const f=document.getElementById("img").files[0];
-  if(t) socket.emit("chat-message",{roomId,message:t});
-  if(f){
-    if(f.size>5*1024*1024) return alert("image too big");
+// CHAT SEND
+send.onclick=()=>{
+  const text=msg.value.trim();
+  const file=fileInput.files[0];
+
+  if(text) socket.emit("chat-text",{roomId,text});
+
+  if(file){
+    if(file.size>50*1024*1024){
+      alert("File too big");
+      return;
+    }
     const r=new FileReader();
-    r.onload=()=>socket.emit("chat-image",{roomId,imageData:r.result});
-    r.readAsDataURL(f);
+    r.onload=()=>{
+      socket.emit("chat-file",{
+        roomId,
+        name:file.name,
+        type:file.type,
+        data:r.result
+      });
+    };
+    r.readAsArrayBuffer(file);
   }
-  document.getElementById("msg").value="";
-  document.getElementById("img").value="";
+
+  msg.value="";
+  fileInput.value="";
 };
 
-socket.on("chat-message",d=>{
+// CHAT RECEIVE
+const msgs=document.getElementById("msgs");
+
+socket.on("chat-text",d=>{
   const div=document.createElement("div");
-  div.textContent=d.message;
+  div.textContent=d.text;
   msgs.appendChild(div);
   msgs.scrollTop=msgs.scrollHeight;
 });
 
-socket.on("chat-image",d=>{
-  const img=document.createElement("img");
-  img.src=d.imageData;
-  img.className="chatimg";
-  msgs.appendChild(img);
+socket.on("chat-file",f=>{
+  const blob=new Blob([f.data],{type:f.type});
+  const url=URL.createObjectURL(blob);
+
+  let el;
+  if(f.type.startsWith("image/")){
+    el=document.createElement("img");
+    el.src=url;
+    el.className="chatimg";
+  }
+  else if(f.type.startsWith("video/")){
+    el=document.createElement("video");
+    el.src=url;
+    el.controls=true;
+    el.style.width="100%";
+  }
+  else if(f.type.startsWith("audio/")){
+    el=document.createElement("audio");
+    el.src=url;
+    el.controls=true;
+  }
+  else{
+    el=document.createElement("a");
+    el.href=url;
+    el.download=f.name;
+    el.textContent="Download "+f.name;
+  }
+
+  msgs.appendChild(el);
   msgs.scrollTop=msgs.scrollHeight;
 });
+
 })();
 </script>
 </body>
 </html>`);
 });
 
-// ===== SERVER STATE =====
-const rooms={};
-
+// ================= SERVER =================
 io.on("connection",socket=>{
 
-  // CHAT (GLOBAL, NOT INSIDE JOIN)
-  socket.on("chat-message",d=>{
-    io.to(d.roomId).emit("chat-message",{from:socket.id,message:d.message});
+  socket.on("chat-text",d=>{
+    io.to(d.roomId).emit("chat-text",{text:d.text});
   });
 
-  socket.on("chat-image",d=>{
-    io.to(d.roomId).emit("chat-image",{from:socket.id,imageData:d.imageData});
+  socket.on("chat-file",d=>{
+    io.to(d.roomId).emit("chat-file",d);
   });
 
   socket.on("signal",d=>{
     io.to(d.to).emit("signal",{from:socket.id,data:d.data});
   });
 
-  socket.on("join-room",({roomId,name,icon})=>{
-    if(!rooms[roomId]) rooms[roomId]={users:[],adminId:null};
-    const r=rooms[roomId];
-
-    if(!r.adminId) r.adminId=socket.id;
-    const isAdmin=r.adminId===socket.id;
-
-    r.users.push({id:socket.id,name,icon,isAdmin});
+  socket.on("join",({roomId,name})=>{
+    if(!rooms[roomId]) rooms[roomId]=[];
+    rooms[roomId].push({id:socket.id,name});
     socket.join(roomId);
 
-    socket.emit("your-id",socket.id);
-    io.to(roomId).emit("user-list",r.users);
-    socket.to(roomId).emit("user-joined",{id:socket.id});
+    socket.emit("id",socket.id);
+    io.to(roomId).emit("users",rooms[roomId]);
+    socket.to(roomId).emit("join-peer",{id:socket.id});
 
     socket.on("disconnect",()=>{
-      r.users=r.users.filter(u=>u.id!==socket.id);
-      if(r.adminId===socket.id && r.users[0]){
-        r.adminId=r.users[0].id;
-        r.users[0].isAdmin=true;
-      }
-      io.to(roomId).emit("user-list",r.users);
-      io.to(roomId).emit("user-left",socket.id);
+      rooms[roomId]=rooms[roomId].filter(u=>u.id!==socket.id);
+      io.to(roomId).emit("users",rooms[roomId]);
+      io.to(roomId).emit("leave-peer",socket.id);
     });
   });
 });
 
-server.listen(3000,()=>console.log("🔥 running on 3000"));
+server.listen(3000,()=>console.log("🔥 running on http://localhost:3000"));
