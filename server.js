@@ -12,9 +12,9 @@ const DEFAULT_ICON = [
 const app = express();
 const server = http.createServer(app);
 
-// 🔥 THIS IS THE MOST IMPORTANT FIX
+// 🔥 ABSOLUTELY REQUIRED
 const io = new Server(server, {
-  maxHttpBufferSize: 25 * 1024 * 1024 // 25MB
+  maxHttpBufferSize: 25 * 1024 * 1024
 });
 
 function generateRoomId() {
@@ -85,7 +85,9 @@ body{
 }
 
 .message img.avatar{
-  width:32px;height:32px;border-radius:50%;
+  width:32px;
+  height:32px;
+  border-radius:50%;
 }
 
 #chat-controls{
@@ -99,6 +101,13 @@ body{
   padding:8px;
   border-radius:6px;
   border:none;
+  background:#111;
+  color:white;
+  outline:none;
+}
+
+#chat-input::placeholder{
+  color:#777;
 }
 
 button{
@@ -117,7 +126,7 @@ button{
   <div id="chat-messages"></div>
 
   <div id="chat-controls">
-    <input id="chat-input" placeholder="Message...">
+    <input id="chat-input" placeholder="Type a message...">
     <button id="send-chat">Send</button>
     <input type="file" id="chat-file">
   </div>
@@ -141,7 +150,9 @@ if(!icon) icon = icons[Math.floor(Math.random()*icons.length)];
 socket.emit("join-room",{roomId,name,icon});
 
 document.getElementById("send-chat").onclick = sendText;
-chatInput.onkeydown = e => e.key==="Enter" && sendText();
+chatInput.onkeydown = e => {
+  if(e.key === "Enter") sendText();
+};
 
 function sendText(){
   const text = chatInput.value.trim();
@@ -186,15 +197,21 @@ function addMessage({name,icon,text,fileData,fileType,time}){
   if(fileData){
     if(fileType.startsWith("image/")){
       const i=document.createElement("img");
-      i.src=fileData; i.style.maxWidth="220px"; i.style.borderRadius="6px";
+      i.src=fileData;
+      i.style.maxWidth="220px";
+      i.style.borderRadius="6px";
       body.appendChild(i);
     } else if(fileType.startsWith("video/")){
       const v=document.createElement("video");
-      v.src=fileData; v.controls=true; v.style.maxWidth="220px";
+      v.src=fileData;
+      v.controls=true;
+      v.style.maxWidth="220px";
       body.appendChild(v);
     } else {
       const a=document.createElement("a");
-      a.href=fileData; a.download="file"; a.textContent="Download file";
+      a.href=fileData;
+      a.textContent="Download file";
+      a.download="file";
       body.appendChild(a);
     }
   } else {
@@ -261,4 +278,4 @@ io.on("connection",socket=>{
   });
 });
 
-server.listen(3000,()=>console.log("✅ Server running on 3000"));
+server.listen(3000,()=>console.log("✅ Server running on port 3000"));
