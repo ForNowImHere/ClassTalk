@@ -1,298 +1,264 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const DEFAULT_ICON = [
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png?v=1748558657344",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png?v=1748558650328",
-  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png?v=1748558651617"
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png"
 ];
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// 🔥 THIS IS THE MOST IMPORTANT FIX
+const io = new Server(server, {
+  maxHttpBufferSize: 25 * 1024 * 1024 // 25MB
+});
 
 function generateRoomId() {
-  const charset = "abcdefghijklmnopqrstuvwxyz";
-  const part = len =>
-    Array.from({ length: len }, () =>
-      charset[Math.floor(Math.random() * charset.length)]
-    ).join("");
-  return `${part(3)}-${part(4)}-${part(3)}`;
+  const c = "abcdefghijklmnopqrstuvwxyz";
+  const p = l => Array.from({ length: l }, () => c[Math.floor(Math.random()*c.length)]).join("");
+  return `${p(3)}-${p(4)}-${p(3)}`;
 }
 
-// Redirect root to new room
-app.get('/', (req,res) => res.redirect(`/room/${generateRoomId()}`));
+app.get("/", (req,res)=>res.redirect(`/room/${generateRoomId()}`));
 
-// Serve room HTML
-app.get('/room/:roomId', (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html lang="en">
+app.get("/room/:roomId", (req,res)=>{
+res.send(`<!DOCTYPE html>
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Voice & Chat Room - ${req.params.roomId}</title>
+<meta charset="UTF-8">
+<title>Room ${req.params.roomId}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-body { background:#111; color:white; font-family:Arial,sans-serif; margin:0; padding:0; }
-#users { display:flex; flex-wrap:wrap; gap:10px; padding:10px; }
-.user { background:#222; padding:10px; border-radius:8px; width:140px; text-align:center; }
-.user img { border-radius:50%; width:48px; height:48px; }
-.name { margin:6px 0; font-weight:bold; }
-.admin { color:gold; font-size:0.9em; }
-.dots { font-size:22px; color:#0f0; }
-button.kick { margin-top:6px; background:#900; border:none; color:white; padding:5px 10px; border-radius:4px; cursor:pointer; }
-#chat { padding:10px; max-width:600px; margin-top:20px; }
-#chat-messages { height:300px; overflow-y:auto; border:1px solid #444; padding:5px; background:#222; border-radius:8px; }
-#chat-input { width:70%; padding:5px; border-radius:4px; border:none; }
-#send-chat { padding:5px 10px; border-radius:4px; }
-#chat-file { margin-top:5px; }
+body{
+  margin:0;
+  background:#111;
+  color:white;
+  font-family:Arial;
+  height:100vh;
+  display:flex;
+}
+
+#users{
+  width:260px;
+  background:#161616;
+  border-right:1px solid #333;
+  overflow-y:auto;
+  padding:10px;
+}
+
+.user{
+  background:#222;
+  padding:8px;
+  border-radius:8px;
+  margin-bottom:8px;
+  text-align:center;
+}
+
+.user img{width:48px;height:48px;border-radius:50%}
+
+.admin{color:gold;font-size:0.8em}
+
+#chat{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  padding:10px;
+}
+
+#chat-messages{
+  flex:1;
+  overflow-y:auto;
+  background:#222;
+  border-radius:8px;
+  padding:8px;
+}
+
+.message{
+  display:flex;
+  gap:8px;
+  margin-bottom:8px;
+}
+
+.message img.avatar{
+  width:32px;height:32px;border-radius:50%;
+}
+
+#chat-controls{
+  display:flex;
+  gap:6px;
+  margin-top:8px;
+}
+
+#chat-input{
+  flex:1;
+  padding:8px;
+  border-radius:6px;
+  border:none;
+}
+
+button{
+  padding:8px 12px;
+  border-radius:6px;
+  border:none;
+  cursor:pointer;
+}
 </style>
 </head>
+
 <body>
-<h1 style="margin:10px;">Room: ${req.params.roomId}</h1>
 <div id="users"></div>
 
 <div id="chat">
   <div id="chat-messages"></div>
-  <input id="chat-input" type="text" placeholder="Type a message..."/>
-  <button id="send-chat">Send</button>
-  <input type="file" id="chat-file"/>
+
+  <div id="chat-controls">
+    <input id="chat-input" placeholder="Message...">
+    <button id="send-chat">Send</button>
+    <input type="file" id="chat-file">
+  </div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-(async () => {
-  const socket = io();
-  const roomId = "${req.params.roomId}";
-  let localStream = null, peers = {}, userId = null, isAdmin = false;
+const socket = io();
+const roomId = "${req.params.roomId}";
 
-  const userName = prompt("Enter your name:","Guest")||"Guest";
-  let userIcon = prompt("Enter icon URL (blank=default)","");
-  const defaultIcons = ${JSON.stringify(DEFAULT_ICON)};
-  if(!userIcon) userIcon = defaultIcons[Math.floor(Math.random()*defaultIcons.length)];
+const usersDiv = document.getElementById("users");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatFile = document.getElementById("chat-file");
 
-  const usersDiv = document.getElementById('users');
-  const chatMessages = document.getElementById('chat-messages');
-  const chatInput = document.getElementById('chat-input');
-  const sendChatBtn = document.getElementById('send-chat');
-  const chatFileInput = document.getElementById('chat-file');
+const name = prompt("Name:","Guest") || "Guest";
+let icon = prompt("Icon URL (blank=random):","");
+const icons = ${JSON.stringify(DEFAULT_ICON)};
+if(!icon) icon = icons[Math.floor(Math.random()*icons.length)];
 
-  socket.emit('join-room',{roomId,name:userName,icon:userIcon});
+socket.emit("join-room",{roomId,name,icon});
 
-  try { localStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
-  catch { alert('Mic access denied'); return; }
+document.getElementById("send-chat").onclick = sendText;
+chatInput.onkeydown = e => e.key==="Enter" && sendText();
 
-  const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-  const analyser = audioCtx.createAnalyser(); analyser.fftSize=256;
-  audioCtx.createMediaStreamSource(localStream).connect(analyser);
-  const dataArray = new Uint8Array(analyser.frequencyBinCount);
+function sendText(){
+  const text = chatInput.value.trim();
+  if(!text) return;
+  socket.emit("chat-message",{roomId,text});
+  chatInput.value="";
+}
 
-  function updateVolume() {
-    analyser.getByteFrequencyData(dataArray);
-    const avg = dataArray.reduce((a,b)=>a+b,0)/dataArray.length;
-    const dotsCount = Math.min(5,Math.floor(avg/30));
-    const dots = "·".repeat(5-dotsCount)+"●".repeat(dotsCount);
-    const meDots = document.getElementById('dots-'+userId);
-    if(meDots) meDots.textContent = dots;
-    requestAnimationFrame(updateVolume);
+chatFile.onchange = ()=>{
+  const file = chatFile.files[0];
+  if(!file) return;
+
+  if(file.size > 8*1024*1024){
+    alert("8MB max file size");
+    chatFile.value="";
+    return;
   }
-  updateVolume();
 
-  const rtcConfig={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+  const r = new FileReader();
+  r.onload = ()=> socket.emit("chat-file",{
+    roomId,
+    fileName:file.name,
+    fileType:file.type,
+    fileData:r.result
+  });
+  r.readAsDataURL(file);
+  chatFile.value="";
+};
 
-  // --- Chat functionality ---
-  sendChatBtn.onclick=()=>{ 
-    const text=chatInput.value.trim(); if(!text)return; 
-    socket.emit('chat-message',{roomId,text}); 
-    chatInput.value=''; 
-  };
+function addMessage({name,icon,text,fileData,fileType,time}){
+  const msg = document.createElement("div");
+  msg.className="message";
 
-  chatFileInput.onchange = () => {
-    const file = chatFileInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      socket.emit('chat-file', {
-        roomId,
-        fileName: file.name,
-        fileType: file.type,
-        fileData: reader.result
-      });
-    };
-    reader.readAsDataURL(file);
-    chatFileInput.value = '';
-  };
+  const av = document.createElement("img");
+  av.src = icon;
+  av.className="avatar";
+  msg.appendChild(av);
 
-  function addChat(name, icon, textOrData, timestamp, isHTML = false, fileType = null) {
-    const div = document.createElement('div');
-    div.style.marginBottom = '8px';
-    div.style.display = 'flex';
-    div.style.alignItems = 'flex-start';
+  const body = document.createElement("div");
+  body.innerHTML = "<b>"+name+"</b> <span style='color:#888;font-size:0.8em'>["+new Date(time).toLocaleTimeString()+"]</span><br>";
 
-    const img = document.createElement('img');
-    img.src = icon;
-    img.style.width = '32px';
-    img.style.height = '32px';
-    img.style.borderRadius = '50%';
-    img.style.marginRight = '6px';
-    div.appendChild(img);
-
-    const content = document.createElement('div');
-    const time = new Date(timestamp).toLocaleTimeString();
-
-    const header = document.createElement('div');
-    header.innerHTML = '<strong>'+name+'</strong> <span style="color:#888;font-size:0.8em;">['+time+']</span>';
-    content.appendChild(header);
-
-    const body = document.createElement('div');
-
-    if (fileType) {
-      if (fileType.startsWith('image/')) {
-        const imgEl = document.createElement('img');
-        imgEl.src = textOrData;
-        imgEl.style.maxWidth = '200px';
-        imgEl.style.borderRadius = '4px';
-        body.appendChild(imgEl);
-      } else if (fileType.startsWith('video/')) {
-        const vidEl = document.createElement('video');
-        vidEl.src = textOrData;
-        vidEl.controls = true;
-        vidEl.style.maxWidth = '200px';
-        vidEl.style.borderRadius = '4px';
-        body.appendChild(vidEl);
-      } else {
-        const link = document.createElement('a');
-        link.href = textOrData;
-        link.download = textOrData;
-        link.textContent = textOrData;
-        body.appendChild(link);
-      }
+  if(fileData){
+    if(fileType.startsWith("image/")){
+      const i=document.createElement("img");
+      i.src=fileData; i.style.maxWidth="220px"; i.style.borderRadius="6px";
+      body.appendChild(i);
+    } else if(fileType.startsWith("video/")){
+      const v=document.createElement("video");
+      v.src=fileData; v.controls=true; v.style.maxWidth="220px";
+      body.appendChild(v);
     } else {
-      body.innerHTML = isHTML ? textOrData : linkify(textOrData);
+      const a=document.createElement("a");
+      a.href=fileData; a.download="file"; a.textContent="Download file";
+      body.appendChild(a);
     }
-
-    content.appendChild(body);
-    div.appendChild(content);
-
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+  } else {
+    body.innerHTML += text.replace(/(https?:\\/\\/[^\\s]+)/g,'<a href="$1" target="_blank">$1</a>');
   }
 
-  function linkify(text) {
-    return text.replace(/(https?:\\/\\/[^\\s]+)/g,'<a href="$1" target="_blank" style="color:#0af;">$1</a>');
-  }
+  msg.appendChild(body);
+  chatMessages.appendChild(msg);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
-  // --- User list + admin + kick ---
-  socket.on('user-list', users=>{
-    usersDiv.innerHTML='';
-    users.forEach(u=>{
-      if(u.id===userId) isAdmin=u.isAdmin;
-      const userEl=document.createElement('div'); 
-      userEl.className='user'; userEl.id='user-'+u.id;
-      userEl.innerHTML='<img src="'+u.icon+'"><div class="name">'+u.name+(u.isAdmin?'<span class="admin">(admin)</span>':'')+'</div>'+
-        '<div class="dots" id="dots-'+u.id+'">·····</div>' +
-        (isAdmin && u.id!==userId?'<button class="kick" data-id="'+u.id+'">Kick</button>':'');
-      usersDiv.appendChild(userEl);
-      const btn=userEl.querySelector('button.kick');
-      if(btn) btn.onclick=()=>{ if(confirm('Kick '+u.name+'?')) socket.emit('kick-user',u.id); };
-    });
+socket.on("chat-message",m=>addMessage({...m,time:m.timestamp}));
+socket.on("chat-file",m=>addMessage({...m,time:m.timestamp}));
+
+socket.on("user-list",users=>{
+  usersDiv.innerHTML="";
+  users.forEach(u=>{
+    const d=document.createElement("div");
+    d.className="user";
+    d.innerHTML='<img src="'+u.icon+'"><br>'+u.name+(u.isAdmin?' <span class="admin">(admin)</span>':'');
+    usersDiv.appendChild(d);
   });
-
-  socket.on('your-id', id=>userId=id);
-
-  // --- WebRTC signaling ---
-  socket.on('signal', async ({from,data})=>{
-    if(!peers[from]) await createPeerConnection(from,false);
-    const pc=peers[from];
-    if(data.type==='offer'){
-      await pc.setRemoteDescription(new RTCSessionDescription(data));
-      const answer=await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('signal',{to:from,data:pc.localDescription});
-    } else if(data.type==='answer') await pc.setRemoteDescription(new RTCSessionDescription(data));
-    else if(data.candidate) try{await pc.addIceCandidate(new RTCIceCandidate(data.candidate));}catch(e){console.warn(e);}
-  });
-
-  socket.on('user-joined', async u=>{ if(u.id!==userId) await createPeerConnection(u.id,true); });
-  socket.on('user-left', id=>{ if(peers[id]){peers[id].close();delete peers[id];} const el=document.getElementById('user-'+id); if(el) el.remove(); });
-
-  async function createPeerConnection(peerId,isInitiator){
-    const pc=new RTCPeerConnection(rtcConfig);
-    peers[peerId]=pc;
-    localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-    pc.ontrack=e=>{
-      let audio=document.getElementById('audio-'+peerId);
-      if(!audio){audio=document.createElement('audio');audio.id='audio-'+peerId;audio.autoplay=true;audio.playsInline=true;audio.style.display='none';document.body.appendChild(audio);}
-      audio.srcObject=e.streams[0];
-    };
-    pc.onicecandidate=e=>{if(e.candidate) socket.emit('signal',{to:peerId,data:{candidate:e.candidate}});}
-    if(isInitiator){ const offer=await pc.createOffer(); await pc.setLocalDescription(offer); socket.emit('signal',{to:peerId,data:pc.localDescription});}
-  }
-
-  window.addEventListener('beforeunload',()=>socket.disconnect());
-
-  // --- Socket chat listeners ---
-  socket.on('chat-message', msg => addChat(msg.name, msg.icon, msg.text, msg.timestamp, false));
-  socket.on('chat-file', msg => addChat(msg.name, msg.icon, msg.fileData, msg.timestamp, true, msg.fileType));
-
-})();
+});
 </script>
 </body>
-</html>
-  `);
+</html>`);
 });
 
-// Rooms in memory
-const rooms = {}; // roomId => { users:[{id,name,icon,isAdmin}], adminId }
+// ===== ROOMS =====
+const rooms = {};
 
-io.on('connection', socket=>{
-  socket.on('join-room', ({roomId,name,icon})=>{
+io.on("connection",socket=>{
+  socket.on("join-room",({roomId,name,icon})=>{
     if(!rooms[roomId]) rooms[roomId]={users:[],adminId:null};
     const room=rooms[roomId];
-    const userId=socket.id;
-    if(!room.adminId) room.adminId=userId;
-    const isAdmin=room.adminId===userId;
-    room.users.push({id:userId,name:name||'Guest',icon:icon||DEFAULT_ICON,isAdmin});
+
+    if(!room.adminId) room.adminId=socket.id;
+
+    room.users.push({
+      id:socket.id,
+      name,
+      icon,
+      isAdmin:room.adminId===socket.id
+    });
+
     socket.join(roomId);
-    socket.emit('your-id',userId);
-    io.to(roomId).emit('user-list',room.users);
-    socket.to(roomId).emit('user-joined',{id:userId,name,icon,isAdmin});
+    io.to(roomId).emit("user-list",room.users);
 
-    // Relay signals
-    socket.on('signal',({to,data})=>{ io.to(to).emit('signal',{from:socket.id,data}); });
-
-    // Kick
-    socket.on('kick-user',kickId=>{
-      if(socket.id!==room.adminId) return;
-      const kickedSocket = io.sockets.sockets.get(kickId);
-      if(kickedSocket){ kickedSocket.emit('kicked'); kickedSocket.disconnect(); }
+    socket.on("chat-message",({roomId,text})=>{
+      const u=room.users.find(x=>x.id===socket.id);
+      if(u) io.to(roomId).emit("chat-message",{name:u.name,icon:u.icon,text,timestamp:Date.now()});
     });
 
-    // Chat messages
-    socket.on('chat-message', ({roomId,text})=>{
-      const user = room.users.find(u=>u.id===socket.id); if(!user) return;
-      io.to(roomId).emit('chat-message',{userId:user.id,name:user.name,icon:user.icon,text,timestamp:Date.now()});
+    socket.on("chat-file",data=>{
+      const u=room.users.find(x=>x.id===socket.id);
+      if(u) io.to(roomId).emit("chat-file",{name:u.name,icon:u.icon,...data,timestamp:Date.now()});
     });
 
-    socket.on('chat-file', ({roomId,fileName,fileType,fileData})=>{
-      const user=room.users.find(u=>u.id===socket.id); if(!user)return;
-      io.to(roomId).emit('chat-file',{userId:user.id,name:user.name,icon:user.icon,fileName,fileType,fileData,timestamp:Date.now()});
-    });
-
-    // Disconnect
-    socket.on('disconnect',()=>{
-      if(!rooms[roomId]) return;
-      room.users = room.users.filter(u=>u.id!==userId);
-      if(room.adminId===userId){
-        if(room.users.length>0){ room.adminId=room.users[0].id; room.users[0].isAdmin=true; } else { delete rooms[roomId]; return; }
-      }
-      io.to(roomId).emit('user-list',room.users);
-      io.to(roomId).emit('user-left',userId);
+    socket.on("disconnect",()=>{
+      room.users = room.users.filter(u=>u.id!==socket.id);
+      io.to(roomId).emit("user-list",room.users);
+      if(room.users.length===0) delete rooms[roomId];
     });
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT,()=>console.log("Server running on port "+PORT));
+server.listen(3000,()=>console.log("✅ Server running on 3000"));
