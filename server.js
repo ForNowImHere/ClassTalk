@@ -15,11 +15,15 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 function generateRoomId() {
-  const charset = 'abcdefghijklmnopqrstuvwxyz';
+  const charset = "abcdefghijklmnopqrstuvwxyz";
   const part = (len) =>
-    Array.from({ length: len }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
-  return $[part(3)]-$[part(4)]-$[part(3)];
+    Array.from({ length: len }, () =>
+      charset[Math.floor(Math.random() * charset.length)]
+    ).join("");
+
+  return `${part(3)}-${part(4)}-${part(3)}`;
 }
+
 
 // Redirect root to a new room
 app.get('/', (req, res) => {
