@@ -1,241 +1,326 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const DEFAULT_ICON = [
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy1.png?v=1748558654514",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/k12zoneguy2.png?v=1748558657344",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/Noicon.png?v=1748558650328",
+  "https://cdn.glitch.global/67560e0a-8219-49e8-b266-19355cf00f35/ee219e7a-ba9c-42f7-b9f0-2a574b256ab9.png?v=1748558651617"
+];
 
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server);
 
-// IMPORTANT: allow large binary payloads
-const io = new Server(server, {
-  maxHttpBufferSize: 50 * 1024 * 1024 // 50MB
-});
-
-const rooms = {};
-
-function makeRoom() {
-  return Math.random().toString(36).slice(2, 6) + "-" +
-         Math.random().toString(36).slice(2, 6);
+function generateRoomId() {
+  const charset = 'abcdefghijklmnopqrstuvwxyz';
+  const part = (len) =>
+    Array.from({ length: len }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
+  return $[part(3)]-$[part(4)]-$[part(3)];
 }
 
-app.get("/", (req, res) => {
-  res.redirect("/room/" + makeRoom());
+// Redirect root to a new room
+app.get('/', (req, res) => {
+  const roomId = generateRoomId();
+  res.redirect(`/room/${roomId}`);
 });
 
-app.get("/room/:id", (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html>
+// Serve the main room page (single HTML)
+app.get('/room/:roomId', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Room ${req.params.id}</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice Chat Room - ${req.params.roomId}</title>
 <style>
-body{margin:0;background:#111;color:#fff;font-family:Arial}
-#users{display:flex;gap:10px;padding:10px;flex-wrap:wrap}
-.user{background:#222;padding:8px;border-radius:8px;width:140px;text-align:center}
-video{width:240px;border-radius:8px;margin:6px}
-#chat{position:fixed;right:10px;bottom:10px;width:320px;background:#222;padding:10px;border-radius:10px}
-#msgs{height:220px;overflow-y:auto}
-textarea{width:100%;resize:none}
-.chatimg{max-width:100%;border-radius:6px;margin:4px 0}
+  body { background: #111; color: white; font-family: Arial, sans-serif; margin: 0; padding: 0; }
+  #users { display: flex; flex-wrap: wrap; padding: 10px; gap: 10px; }
+  .user { background: #222; padding: 10px; border-radius: 8px; width: 140px; text-align: center; }
+  .user img { border-radius: 50%; width: 48px; height: 48px; }
+  .name { margin: 6px 0; font-weight: bold; }
+  .admin { color: gold; font-size: 0.9em; }
+  .dots { font-size: 22px; color: #0f0; }
+  button.kick { margin-top: 6px; background: #900; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
 </style>
 </head>
 <body>
-
-<h3 style="margin:10px">Room ${req.params.id}</h3>
+<h1 style="margin:10px;">Voice Chat Room: ${req.params.roomId}</h1>
 <div id="users"></div>
-<video id="me" autoplay muted></video>
-
-<div id="chat">
-  <div id="msgs"></div>
-  <textarea id="msg" placeholder="message"></textarea>
-  <input type="file" id="file">
-  <button id="send">Send</button>
-</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-(async()=>{
-const socket = io();
-const roomId="${req.params.id}";
-let myId;
-let peers={};
+(async () => {
+  const socket = io();
+  const roomId = "${req.params.roomId}";
+  let localStream = null;
+  let peers = {};
+  let userId = null;
+  let isAdmin = false;
 
-const name=prompt("name","Guest")||"Guest";
-socket.emit("join",{roomId,name});
+  // Prompt for name and icon URL
+  const userName = prompt("Enter your name:", "Guest") || "Guest";
+  let userIcon = prompt("Enter icon URL (leave blank for default):", "") || "";
 
-// MEDIA
-const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-document.getElementById("me").srcObject=stream;
+  if (!userIcon) {
+  const icons = ${JSON.stringify(DEFAULT_ICON)};
+  userIcon = icons[Math.floor(Math.random() * icons.length)];
+  }
 
-const rtc={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
+  // Elements
+  const usersDiv = document.getElementById('users');
 
-socket.on("id",id=>myId=id);
+  // Join the room
+  socket.emit('join-room', { roomId, name: userName, icon: userIcon });
 
-// USERS
-socket.on("users",list=>{
-  const u=document.getElementById("users");
-  u.innerHTML="";
-  list.forEach(x=>{
-    const d=document.createElement("div");
-    d.className="user";
-    d.textContent=x.name;
-    u.appendChild(d);
+  // Get mic audio only
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    alert('Microphone access denied or not available.');
+    return;
+  }
+
+  // Audio context for volume detection
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+  const source = audioCtx.createMediaStreamSource(localStream);
+  source.connect(analyser);
+
+  // Volume indicator update loop
+  function updateVolumeIndicator() {
+    analyser.getByteFrequencyData(dataArray);
+    const sum = dataArray.reduce((a,b) => a+b, 0);
+    const avg = sum / dataArray.length;
+    const dotsCount = Math.min(5, Math.floor(avg / 30));
+    const dots = "·".repeat(5 - dotsCount) + "●".repeat(dotsCount);
+
+    const meDots = document.getElementById('dots-' + userId);
+    if (meDots) meDots.textContent = dots;
+
+    // Also update peers volume dots
+    for (const peerId in peers) {
+      const el = document.getElementById('dots-' + peerId);
+      // Peer volume updating happens on audio track event, no local access here
+    }
+
+    requestAnimationFrame(updateVolumeIndicator);
+  }
+
+  updateVolumeIndicator();
+
+  // Setup WebRTC Peer Connection config
+  const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  // Handle new user list from server
+  socket.on('user-list', users => {
+    usersDiv.innerHTML = ''; // Clear old
+
+    users.forEach(u => {
+      if (u.id === userId) isAdmin = u.isAdmin; // Detect admin
+
+      const userEl = document.createElement('div');
+      userEl.className = 'user';
+      userEl.id = 'user-' + u.id;
+
+      userEl.innerHTML = \
+        <img src="\${u.icon || '${DEFAULT_ICON}'}" alt="icon" />
+        <div class="name">\${u.name} \${u.isAdmin ? '<span class="admin">(admin)</span>' : ''}</div>
+        <div class="dots" id="dots-\${u.id}">·····</div>
+        \${isAdmin && u.id !== userId ? '<button class="kick" data-id="' + u.id + '">Kick</button>' : ''}
+      \;
+
+      usersDiv.appendChild(userEl);
+
+      // Kick button event for admin
+      if (isAdmin && u.id !== userId) {
+        userEl.querySelector('button.kick').onclick = () => {
+          if (confirm('Kick ' + u.name + '?')) {
+            socket.emit('kick-user', u.id);
+          }
+        };
+      }
+    });
   });
-});
 
-// WEBRTC
-async function connect(id,init){
-  const pc=new RTCPeerConnection(rtc);
-  peers[id]=pc;
-  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  // When server assigns your ID
+  socket.on('your-id', id => {
+    userId = id;
+  });
 
-  pc.ontrack=e=>{
-    let v=document.getElementById("v-"+id);
-    if(!v){
-      v=document.createElement("video");
-      v.id="v-"+id;
-      v.autoplay=true;
-      document.body.appendChild(v);
+  // WebRTC signaling handlers
+  socket.on('signal', async ({ from, data }) => {
+    if (!peers[from]) await createPeerConnection(from, false);
+
+    const pc = peers[from];
+    if (data.type === 'offer') {
+      await pc.setRemoteDescription(new RTCSessionDescription(data));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('signal', { to: from, data: pc.localDescription });
+    } else if (data.type === 'answer') {
+      await pc.setRemoteDescription(new RTCSessionDescription(data));
+    } else if (data.candidate) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch (e) {
+        console.warn('Failed to add ICE candidate', e);
+      }
     }
-    v.srcObject=e.streams[0];
-  };
+  });
 
-  pc.onicecandidate=e=>{
-    if(e.candidate) socket.emit("signal",{to:id,data:{candidate:e.candidate}});
-  };
+  // New user joined
+  socket.on('user-joined', async (newUser) => {
+    if (newUser.id === userId) return; // Ignore self
+    await createPeerConnection(newUser.id, true);
+  });
 
-  if(init){
-    const off=await pc.createOffer();
-    await pc.setLocalDescription(off);
-    socket.emit("signal",{to:id,data:pc.localDescription});
-  }
-}
-
-socket.on("join-peer",d=>connect(d.id,true));
-socket.on("leave-peer",id=>{
-  if(peers[id]) peers[id].close();
-});
-
-socket.on("signal",async({from,data})=>{
-  if(!peers[from]) await connect(from,false);
-  const pc=peers[from];
-  if(data.type==="offer"){
-    await pc.setRemoteDescription(data);
-    const ans=await pc.createAnswer();
-    await pc.setLocalDescription(ans);
-    socket.emit("signal",{to:from,data:pc.localDescription});
-  }else if(data.type==="answer"){
-    await pc.setRemoteDescription(data);
-  }else if(data.candidate){
-    await pc.addIceCandidate(data.candidate);
-  }
-});
-
-// CHAT SEND
-send.onclick=()=>{
-  const text=msg.value.trim();
-  const file=fileInput.files[0];
-
-  if(text) socket.emit("chat-text",{roomId,text});
-
-  if(file){
-    if(file.size>50*1024*1024){
-      alert("File too big");
-      return;
+  // User left
+  socket.on('user-left', (id) => {
+    if (peers[id]) {
+      peers[id].close();
+      delete peers[id];
     }
-    const r=new FileReader();
-    r.onload=()=>{
-      socket.emit("chat-file",{
-        roomId,
-        name:file.name,
-        type:file.type,
-        data:r.result
-      });
+    const userEl = document.getElementById('user-' + id);
+    if (userEl) userEl.remove();
+  });
+
+  // Create WebRTC peer connection and add tracks
+  async function createPeerConnection(peerId, isInitiator) {
+    const pc = new RTCPeerConnection(rtcConfig);
+    peers[peerId] = pc;
+
+    // Add local audio tracks
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    // Receive remote audio track
+    pc.ontrack = (event) => {
+      let audioEl = document.getElementById('audio-' + peerId);
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.id = 'audio-' + peerId;
+        audioEl.autoplay = true;
+        audioEl.playsInline = true;
+        audioEl.style.display = 'none';
+        document.body.appendChild(audioEl);
+      }
+      audioEl.srcObject = event.streams[0];
+
+      // Volume indicator for remote stream
+      const remoteAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const remoteAnalyser = remoteAudioCtx.createAnalyser();
+      remoteAnalyser.fftSize = 256;
+      const remoteDataArray = new Uint8Array(remoteAnalyser.frequencyBinCount);
+
+      const source = remoteAudioCtx.createMediaStreamSource(event.streams[0]);
+      source.connect(remoteAnalyser);
+
+      function updateRemoteVolume() {
+        remoteAnalyser.getByteFrequencyData(remoteDataArray);
+        const sum = remoteDataArray.reduce((a,b) => a + b, 0);
+        const avg = sum / remoteDataArray.length;
+        const dotsCount = Math.min(5, Math.floor(avg / 30));
+        const dots = "·".repeat(5 - dotsCount) + "●".repeat(dotsCount);
+        const dotsEl = document.getElementById('dots-' + peerId);
+        if (dotsEl) dotsEl.textContent = dots;
+        requestAnimationFrame(updateRemoteVolume);
+      }
+      updateRemoteVolume();
     };
-    r.readAsArrayBuffer(file);
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('signal', { to: peerId, data: { candidate: event.candidate } });
+      }
+    };
+
+    if (isInitiator) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('signal', { to: peerId, data: pc.localDescription });
+    }
   }
 
-  msg.value="";
-  fileInput.value="";
-};
-
-// CHAT RECEIVE
-const msgs=document.getElementById("msgs");
-
-socket.on("chat-text",d=>{
-  const div=document.createElement("div");
-  div.textContent=d.text;
-  msgs.appendChild(div);
-  msgs.scrollTop=msgs.scrollHeight;
-});
-
-socket.on("chat-file",f=>{
-  const blob=new Blob([f.data],{type:f.type});
-  const url=URL.createObjectURL(blob);
-
-  let el;
-  if(f.type.startsWith("image/")){
-    el=document.createElement("img");
-    el.src=url;
-    el.className="chatimg";
-  }
-  else if(f.type.startsWith("video/")){
-    el=document.createElement("video");
-    el.src=url;
-    el.controls=true;
-    el.style.width="100%";
-  }
-  else if(f.type.startsWith("audio/")){
-    el=document.createElement("audio");
-    el.src=url;
-    el.controls=true;
-  }
-  else{
-    el=document.createElement("a");
-    el.href=url;
-    el.download=f.name;
-    el.textContent="Download "+f.name;
-  }
-
-  msgs.appendChild(el);
-  msgs.scrollTop=msgs.scrollHeight;
-});
-
+  // Before unload close
+  window.addEventListener('beforeunload', () => {
+    socket.disconnect();
+  });
 })();
 </script>
 </body>
-</html>`);
+</html>  
+  `);
 });
 
-// ================= SERVER =================
-io.on("connection",socket=>{
+// Server state in memory
+const rooms = {}; // roomId => { users: [{id, name, icon, isAdmin}], adminId }
 
-  socket.on("chat-text",d=>{
-    io.to(d.roomId).emit("chat-text",{text:d.text});
-  });
+io.on('connection', (socket) => {
+  socket.on('join-room', ({ roomId, name, icon }) => {
+    if (!rooms[roomId]) rooms[roomId] = { users: [], adminId: null };
 
-  socket.on("chat-file",d=>{
-    io.to(d.roomId).emit("chat-file",d);
-  });
+    const room = rooms[roomId];
+    const userId = socket.id;
 
-  socket.on("signal",d=>{
-    io.to(d.to).emit("signal",{from:socket.id,data:d.data});
-  });
+    // Assign admin if none
+    if (!room.adminId) room.adminId = userId;
 
-  socket.on("join",({roomId,name})=>{
-    if(!rooms[roomId]) rooms[roomId]=[];
-    rooms[roomId].push({id:socket.id,name});
+    const isAdmin = room.adminId === userId;
+
+    room.users.push({ id: userId, name: name || 'Guest', icon: icon || DEFAULT_ICON, isAdmin });
+
     socket.join(roomId);
 
-    socket.emit("id",socket.id);
-    io.to(roomId).emit("users",rooms[roomId]);
-    socket.to(roomId).emit("join-peer",{id:socket.id});
+    // Notify user their id
+    socket.emit('your-id', userId);
 
-    socket.on("disconnect",()=>{
-      rooms[roomId]=rooms[roomId].filter(u=>u.id!==socket.id);
-      io.to(roomId).emit("users",rooms[roomId]);
-      io.to(roomId).emit("leave-peer",socket.id);
+    // Broadcast updated user list
+    io.to(roomId).emit('user-list', room.users);
+
+    // Notify others new user joined
+    socket.to(roomId).emit('user-joined', { id: userId, name, icon, isAdmin });
+
+    // Relay signaling messages
+    socket.on('signal', ({ to, data }) => {
+      io.to(to).emit('signal', { from: socket.id, data });
+    });
+
+    // Kick user event (admin only)
+    socket.on('kick-user', (kickId) => {
+      if (socket.id !== room.adminId) return;
+      const kickedSocket = io.sockets.sockets.get(kickId);
+      if (kickedSocket) {
+        kickedSocket.emit('kicked');
+        kickedSocket.disconnect();
+      };
+    });
+
+    // Handle disconnect
+    socket.on('disconnect', () => {
+      if (!rooms[roomId]) return;
+      room.users = room.users.filter(u => u.id !== userId);
+
+      // If admin left, assign new admin (oldest user)
+      if (room.adminId === userId) {
+        if (room.users.length > 0) {
+          room.adminId = room.users[0].id;
+          room.users[0].isAdmin = true;
+        } else {
+          delete rooms[roomId];
+          return;
+        }
+      }
+
+      io.to(roomId).emit('user-list', room.users);
+      io.to(roomId).emit('user-left', userId);
     });
   });
 });
 
-server.listen(3000,()=>console.log("🔥 running on http://localhost:3000"));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log("Voice chat server listening on port " + PORT));
