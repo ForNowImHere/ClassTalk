@@ -47,6 +47,7 @@ button.kick { margin-top:6px; background:#900; border:none; color:white; padding
 #chat-messages { height:300px; overflow-y:auto; border:1px solid #444; padding:5px; background:#222; border-radius:8px; }
 #chat-input { width:70%; padding:5px; border-radius:4px; border:none; }
 #send-chat { padding:5px 10px; border-radius:4px; }
+#chat-file { margin-top:5px; }
 </style>
 </head>
 <body>
@@ -57,7 +58,7 @@ button.kick { margin-top:6px; background:#900; border:none; color:white; padding
   <div id="chat-messages"></div>
   <input id="chat-input" type="text" placeholder="Type a message..."/>
   <button id="send-chat">Send</button>
-  <input type="file" id="chat-file" style="margin-top:5px;"/>
+  <input type="file" id="chat-file"/>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -85,8 +86,8 @@ button.kick { margin-top:6px; background:#900; border:none; color:white; padding
 
   const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
   const analyser = audioCtx.createAnalyser(); analyser.fftSize=256;
-  const dataArray = new Uint8Array(analyser.frequencyBinCount);
   audioCtx.createMediaStreamSource(localStream).connect(analyser);
+  const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
   function updateVolume() {
     analyser.getByteFrequencyData(dataArray);
@@ -108,42 +109,88 @@ button.kick { margin-top:6px; background:#900; border:none; color:white; padding
     chatInput.value=''; 
   };
 
-  chatFileInput.onchange=()=>{
-    const file = chatFileInput.files[0]; if(!file) return;
+  chatFileInput.onchange = () => {
+    const file = chatFileInput.files[0];
+    if (!file) return;
     const reader = new FileReader();
-    reader.onload = ()=> socket.emit('chat-file',{roomId,fileName:file.name,fileType:file.type,fileData:reader.result});
+    reader.onload = () => {
+      socket.emit('chat-file', {
+        roomId,
+        fileName: file.name,
+        fileType: file.type,
+        fileData: reader.result
+      });
+    };
     reader.readAsDataURL(file);
-    chatFileInput.value='';
+    chatFileInput.value = '';
   };
 
-  socket.on('chat-message', msg => addChat(msg.name,msg.icon,msg.text,msg.timestamp,false));
-  socket.on('chat-file', msg => {
-    let content;
-    if(msg.fileType.startsWith('image/')) content='<img src="'+msg.fileData+'" style="max-width:200px;border-radius:4px;">';
-    else if(msg.fileType.startsWith('video/')) content='<video src="'+msg.fileData+'" controls style="max-width:200px;border-radius:4px;"></video>';
-    else content='<a href="'+msg.fileData+'" download="'+msg.fileName+'">'+msg.fileName+'</a>';
-    addChat(msg.name,msg.icon,content,msg.timestamp,true);
-  });
+  function addChat(name, icon, textOrData, timestamp, isHTML = false, fileType = null) {
+    const div = document.createElement('div');
+    div.style.marginBottom = '8px';
+    div.style.display = 'flex';
+    div.style.alignItems = 'flex-start';
 
-  function addChat(name,icon,text,timestamp,isHTML=false){
-    const div=document.createElement('div');
-    div.style.marginBottom='8px'; div.style.display='flex'; div.style.alignItems='center';
-    const time=new Date(timestamp).toLocaleTimeString();
-    div.innerHTML='<img src="'+icon+'" style="width:32px;height:32px;border-radius:50%;margin-right:6px;">'+
-      '<div><strong>'+name+'</strong> <span style="color:#888;font-size:0.8em;">['+time+']</span><br>'+
-      (isHTML?text:linkify(text))+'</div>';
+    const img = document.createElement('img');
+    img.src = icon;
+    img.style.width = '32px';
+    img.style.height = '32px';
+    img.style.borderRadius = '50%';
+    img.style.marginRight = '6px';
+    div.appendChild(img);
+
+    const content = document.createElement('div');
+    const time = new Date(timestamp).toLocaleTimeString();
+
+    const header = document.createElement('div');
+    header.innerHTML = '<strong>'+name+'</strong> <span style="color:#888;font-size:0.8em;">['+time+']</span>';
+    content.appendChild(header);
+
+    const body = document.createElement('div');
+
+    if (fileType) {
+      if (fileType.startsWith('image/')) {
+        const imgEl = document.createElement('img');
+        imgEl.src = textOrData;
+        imgEl.style.maxWidth = '200px';
+        imgEl.style.borderRadius = '4px';
+        body.appendChild(imgEl);
+      } else if (fileType.startsWith('video/')) {
+        const vidEl = document.createElement('video');
+        vidEl.src = textOrData;
+        vidEl.controls = true;
+        vidEl.style.maxWidth = '200px';
+        vidEl.style.borderRadius = '4px';
+        body.appendChild(vidEl);
+      } else {
+        const link = document.createElement('a');
+        link.href = textOrData;
+        link.download = textOrData;
+        link.textContent = textOrData;
+        body.appendChild(link);
+      }
+    } else {
+      body.innerHTML = isHTML ? textOrData : linkify(textOrData);
+    }
+
+    content.appendChild(body);
+    div.appendChild(content);
+
     chatMessages.appendChild(div);
-    chatMessages.scrollTop=chatMessages.scrollHeight;
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  function linkify(text){ return text.replace(/(https?:\\/\\/[^\\s]+)/g,'<a href="$1" target="_blank" style="color:#0af;">$1</a>'); }
+  function linkify(text) {
+    return text.replace(/(https?:\\/\\/[^\\s]+)/g,'<a href="$1" target="_blank" style="color:#0af;">$1</a>');
+  }
 
   // --- User list + admin + kick ---
   socket.on('user-list', users=>{
     usersDiv.innerHTML='';
     users.forEach(u=>{
       if(u.id===userId) isAdmin=u.isAdmin;
-      const userEl=document.createElement('div'); userEl.className='user'; userEl.id='user-'+u.id;
+      const userEl=document.createElement('div'); 
+      userEl.className='user'; userEl.id='user-'+u.id;
       userEl.innerHTML='<img src="'+u.icon+'"><div class="name">'+u.name+(u.isAdmin?'<span class="admin">(admin)</span>':'')+'</div>'+
         '<div class="dots" id="dots-'+u.id+'">·····</div>' +
         (isAdmin && u.id!==userId?'<button class="kick" data-id="'+u.id+'">Kick</button>':'');
@@ -185,6 +232,11 @@ button.kick { margin-top:6px; background:#900; border:none; color:white; padding
   }
 
   window.addEventListener('beforeunload',()=>socket.disconnect());
+
+  // --- Socket chat listeners ---
+  socket.on('chat-message', msg => addChat(msg.name, msg.icon, msg.text, msg.timestamp, false));
+  socket.on('chat-file', msg => addChat(msg.name, msg.icon, msg.fileData, msg.timestamp, true, msg.fileType));
+
 })();
 </script>
 </body>
