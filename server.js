@@ -65,103 +65,68 @@ app.get('/room/:roomId', (req, res) => {
   let userId = null;
   let isAdmin = false;
 
-  // Prompt for name and icon URL
+  // Prompt for name and icon
   const userName = prompt("Enter your name:", "Guest") || "Guest";
-  let userIcon = prompt("Enter icon URL (leave blank for default):", "") || "";
+  let userIcon = prompt("Enter icon URL (leave blank for default):", "");
+  const defaultIcons = ${JSON.stringify(DEFAULT_ICON)};
+  if (!userIcon) userIcon = defaultIcons[Math.floor(Math.random() * defaultIcons.length)];
 
-  if (!userIcon) {
-  const icons = ${JSON.stringify(DEFAULT_ICON)};
-  userIcon = icons[Math.floor(Math.random() * icons.length)];
-  }
-
-  // Elements
   const usersDiv = document.getElementById('users');
 
-  // Join the room
   socket.emit('join-room', { roomId, name: userName, icon: userIcon });
 
-  // Get mic audio only
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    alert('Microphone access denied or not available.');
-    return;
-  }
+  // Mic access
+  try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { alert('Mic access denied'); return; }
 
-  // Audio context for volume detection
+  // Volume indicator setup
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   const dataArray = new Uint8Array(analyser.frequencyBinCount);
+  audioCtx.createMediaStreamSource(localStream).connect(analyser);
 
-  const source = audioCtx.createMediaStreamSource(localStream);
-  source.connect(analyser);
-
-  // Volume indicator update loop
   function updateVolumeIndicator() {
     analyser.getByteFrequencyData(dataArray);
-    const sum = dataArray.reduce((a,b) => a+b, 0);
-    const avg = sum / dataArray.length;
+    const avg = dataArray.reduce((a,b) => a+b,0)/dataArray.length;
     const dotsCount = Math.min(5, Math.floor(avg / 30));
-    const dots = "·".repeat(5 - dotsCount) + "●".repeat(dotsCount);
-
+    const dots = "·".repeat(5-dotsCount) + "●".repeat(dotsCount);
     const meDots = document.getElementById('dots-' + userId);
     if (meDots) meDots.textContent = dots;
-
-    // Also update peers volume dots
-    for (const peerId in peers) {
-      const el = document.getElementById('dots-' + peerId);
-      // Peer volume updating happens on audio track event, no local access here
-    }
-
     requestAnimationFrame(updateVolumeIndicator);
   }
-
   updateVolumeIndicator();
 
-  // Setup WebRTC Peer Connection config
+  // WebRTC config
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-  // Handle new user list from server
+  // Update user list
   socket.on('user-list', users => {
-    usersDiv.innerHTML = ''; // Clear old
-
+    usersDiv.innerHTML = '';
     users.forEach(u => {
-      if (u.id === userId) isAdmin = u.isAdmin; // Detect admin
-
+      if (u.id === userId) isAdmin = u.isAdmin;
       const userEl = document.createElement('div');
       userEl.className = 'user';
       userEl.id = 'user-' + u.id;
-
-      userEl.innerHTML = \
-        <img src="\${u.icon || '${DEFAULT_ICON}'}" alt="icon" />
+      userEl.innerHTML = \`
+        <img src="\${u.icon}" alt="icon" />
         <div class="name">\${u.name} \${u.isAdmin ? '<span class="admin">(admin)</span>' : ''}</div>
         <div class="dots" id="dots-\${u.id}">·····</div>
         \${isAdmin && u.id !== userId ? '<button class="kick" data-id="' + u.id + '">Kick</button>' : ''}
-      \;
-
+      \`;
       usersDiv.appendChild(userEl);
 
-      // Kick button event for admin
-      if (isAdmin && u.id !== userId) {
-        userEl.querySelector('button.kick').onclick = () => {
-          if (confirm('Kick ' + u.name + '?')) {
-            socket.emit('kick-user', u.id);
-          }
-        };
-      }
+      // Kick button click
+      const btn = userEl.querySelector('button.kick');
+      if (btn) btn.onclick = () => { if(confirm('Kick '+u.name+'?')) socket.emit('kick-user', u.id); }
     });
   });
 
-  // When server assigns your ID
-  socket.on('your-id', id => {
-    userId = id;
-  });
+  socket.on('your-id', id => userId = id);
 
-  // WebRTC signaling handlers
+  // WebRTC signaling
   socket.on('signal', async ({ from, data }) => {
     if (!peers[from]) await createPeerConnection(from, false);
-
     const pc = peers[from];
     if (data.type === 'offer') {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
@@ -171,94 +136,42 @@ app.get('/room/:roomId', (req, res) => {
     } else if (data.type === 'answer') {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
     } else if (data.candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      } catch (e) {
-        console.warn('Failed to add ICE candidate', e);
-      }
+      try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e){console.warn(e);}
     }
   });
 
-  // New user joined
-  socket.on('user-joined', async (newUser) => {
-    if (newUser.id === userId) return; // Ignore self
-    await createPeerConnection(newUser.id, true);
-  });
+  socket.on('user-joined', async (newUser) => { if(newUser.id!==userId) await createPeerConnection(newUser.id,true); });
+  socket.on('user-left', id => { if(peers[id]) { peers[id].close(); delete peers[id]; } const el=document.getElementById('user-'+id); if(el) el.remove(); });
 
-  // User left
-  socket.on('user-left', (id) => {
-    if (peers[id]) {
-      peers[id].close();
-      delete peers[id];
-    }
-    const userEl = document.getElementById('user-' + id);
-    if (userEl) userEl.remove();
-  });
-
-  // Create WebRTC peer connection and add tracks
   async function createPeerConnection(peerId, isInitiator) {
     const pc = new RTCPeerConnection(rtcConfig);
     peers[peerId] = pc;
-
-    // Add local audio tracks
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-    // Receive remote audio track
-    pc.ontrack = (event) => {
-      let audioEl = document.getElementById('audio-' + peerId);
-      if (!audioEl) {
-        audioEl = document.createElement('audio');
-        audioEl.id = 'audio-' + peerId;
-        audioEl.autoplay = true;
-        audioEl.playsInline = true;
-        audioEl.style.display = 'none';
+    localStream.getTracks().forEach(track=>pc.addTrack(track, localStream));
+    pc.ontrack = event => {
+      let audioEl = document.getElementById('audio-'+peerId);
+      if(!audioEl){
+        audioEl=document.createElement('audio');
+        audioEl.id='audio-'+peerId;
+        audioEl.autoplay=true;
+        audioEl.playsInline=true;
+        audioEl.style.display='none';
         document.body.appendChild(audioEl);
       }
-      audioEl.srcObject = event.streams[0];
-
-      // Volume indicator for remote stream
-      const remoteAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const remoteAnalyser = remoteAudioCtx.createAnalyser();
-      remoteAnalyser.fftSize = 256;
-      const remoteDataArray = new Uint8Array(remoteAnalyser.frequencyBinCount);
-
-      const source = remoteAudioCtx.createMediaStreamSource(event.streams[0]);
-      source.connect(remoteAnalyser);
-
-      function updateRemoteVolume() {
-        remoteAnalyser.getByteFrequencyData(remoteDataArray);
-        const sum = remoteDataArray.reduce((a,b) => a + b, 0);
-        const avg = sum / remoteDataArray.length;
-        const dotsCount = Math.min(5, Math.floor(avg / 30));
-        const dots = "·".repeat(5 - dotsCount) + "●".repeat(dotsCount);
-        const dotsEl = document.getElementById('dots-' + peerId);
-        if (dotsEl) dotsEl.textContent = dots;
-        requestAnimationFrame(updateRemoteVolume);
-      }
-      updateRemoteVolume();
+      audioEl.srcObject=event.streams[0];
     };
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('signal', { to: peerId, data: { candidate: event.candidate } });
-      }
-    };
-
-    if (isInitiator) {
+    pc.onicecandidate = e => { if(e.candidate) socket.emit('signal',{to:peerId,data:{candidate:e.candidate}}); }
+    if(isInitiator){
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      socket.emit('signal', { to: peerId, data: pc.localDescription });
+      socket.emit('signal',{to:peerId,data:pc.localDescription});
     }
   }
 
-  // Before unload close
-  window.addEventListener('beforeunload', () => {
-    socket.disconnect();
-  });
+  window.addEventListener('beforeunload',()=>socket.disconnect());
 })();
 </script>
 </body>
-</html>  
+</html>
   `);
 });
 
