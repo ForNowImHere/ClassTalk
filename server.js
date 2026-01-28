@@ -4,18 +4,17 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
   maxHttpBufferSize: 25 * 1024 * 1024
 });
 
 const rooms = {};
 
-function roomId() {
-  return Math.random().toString(36).slice(2, 10);
+function genRoom() {
+  return Math.random().toString(36).slice(2, 9);
 }
 
-app.get("/", (req, res) => res.redirect("/room/" + roomId()));
+app.get("/", (req, res) => res.redirect("/room/" + genRoom()));
 
 app.get("/room/:id", (req, res) => {
 res.send(`<!DOCTYPE html>
@@ -28,15 +27,15 @@ res.send(`<!DOCTYPE html>
 *{box-sizing:border-box}
 body{
   margin:0;
+  height:100vh;
+  display:flex;
   background:#0f0f0f;
   color:white;
   font-family:Arial;
-  height:100vh;
-  display:flex;
 }
 #users{
   width:260px;
-  background:#151515;
+  background:#141414;
   padding:10px;
   overflow-y:auto;
 }
@@ -90,8 +89,8 @@ audio{display:none}
   <div id="controls">
     <input id="input" placeholder="Type message…" />
     <button onclick="send()">Send</button>
-    <button onclick="toggleMute()">Mute</button>
-    <button onclick="toggleDeafen()">Deafen</button>
+    <button id="muteBtn" onclick="toggleMute()">Mic: ON</button>
+    <button id="deafenBtn" onclick="toggleDeafen()">Hear: ON</button>
     <input type="file" id="file">
   </div>
 </div>
@@ -112,11 +111,6 @@ let muted=false;
 let deafened=false;
 const peers={};
 
-navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
-  stream=s;
-  socket.emit("join",{room,name});
-});
-
 function addMsg(html){
   const d=document.createElement("div");
   d.className="msg";
@@ -124,6 +118,12 @@ function addMsg(html){
   messages.appendChild(d);
   messages.scrollTop=messages.scrollHeight;
 }
+
+navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
+  stream=s;
+  socket.emit("join",{room,name});
+  initMeter();
+}).catch(()=>alert("Mic denied"));
 
 function send(){
   if(!input.value.trim()) return;
@@ -166,7 +166,7 @@ socket.on("users",list=>{
     d.innerHTML=\`
       <b>\${u.name}</b> \${u.admin?"<span class='admin'>(admin)</span>":""}
       <input class="slider" type="range" min="0" max="1" step="0.01"
-        onchange="setVol('\${u.id}',this.value)">
+        oninput="setVol('\${u.id}',this.value)">
     \`;
     usersDiv.appendChild(d);
   });
@@ -175,7 +175,9 @@ socket.on("users",list=>{
 /* ===== VOICE ===== */
 
 function peer(id){
-  const pc=new RTCPeerConnection();
+  const pc=new RTCPeerConnection({
+    iceServers:[{urls:"stun:stun.l.google.com:19302"}]
+  });
   peers[id]=pc;
 
   stream.getTracks().forEach(t=>pc.addTrack(t,stream));
@@ -221,26 +223,54 @@ socket.on("ice",d=>{
   peers[d.from]?.addIceCandidate(d.c);
 });
 
+/* ===== MUTE / DEAFEN ===== */
+
 function toggleMute(){
   muted=!muted;
-  stream.getTracks().forEach(t=>t.enabled=!muted);
+  stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  document.getElementById("muteBtn").textContent =
+    muted ? "Mic: OFF" : "Mic: ON";
 }
 
 function toggleDeafen(){
   deafened=!deafened;
   document.querySelectorAll("audio").forEach(a=>a.muted=deafened);
+  document.getElementById("deafenBtn").textContent =
+    deafened ? "Hear: OFF" : "Hear: ON";
 }
 
 function setVol(id,v){
   const a=document.getElementById("a_"+id);
   if(a) a.volume=v;
 }
+
+/* ===== MIC METER ===== */
+
+function initMeter(){
+  const ctx=new AudioContext();
+  const analyser=ctx.createAnalyser();
+  analyser.fftSize=256;
+  const src=ctx.createMediaStreamSource(stream);
+  src.connect(analyser);
+  const data=new Uint8Array(analyser.frequencyBinCount);
+
+  function tick(){
+    analyser.getByteFrequencyData(data);
+    const avg=data.reduce((a,b)=>a+b,0)/data.length;
+    const glow=Math.min(20,avg/4);
+    document.getElementById("muteBtn").style.boxShadow =
+      "0 0 "+glow+"px lime";
+    requestAnimationFrame(tick);
+  }
+  document.body.onclick=()=>ctx.resume();
+  tick();
+}
 </script>
 </body>
 </html>`);
 });
 
-/* ===== SOCKET SERVER ===== */
+/* ===== SERVER SOCKET ===== */
 
 io.on("connection",s=>{
   s.on("join",({room,name})=>{
@@ -251,14 +281,18 @@ io.on("connection",s=>{
     io.to(room).emit("users",rooms[room].users);
   });
 
-  s.on("msg",t=>{
-    for(const r of s.rooms)
-      io.to(r).emit("msg",{name:"User",text:t});
+  s.on("msg",text=>{
+    const room=[...s.rooms].find(r=>r!==s.id);
+    if(!room) return;
+    const user=rooms[room].users.find(u=>u.id===s.id);
+    io.to(room).emit("msg",{name:user.name,text});
   });
 
   s.on("file",f=>{
-    for(const r of s.rooms)
-      io.to(r).emit("file",{name:"User",type:f.type,data:f.data,file:f.name});
+    const room=[...s.rooms].find(r=>r!==s.id);
+    if(!room) return;
+    const user=rooms[room].users.find(u=>u.id===s.id);
+    io.to(room).emit("file",{name:user.name,type:f.type,data:f.data,file:f.name});
   });
 
   s.on("offer",d=>s.to(d.to).emit("offer",{from:s.id,o:d.o}));
@@ -274,4 +308,4 @@ io.on("connection",s=>{
   });
 });
 
-server.listen(3000,()=>console.log("✅ FULL CHAT + VOICE RUNNING"));
+server.listen(3000,()=>console.log("✅ CHAT + VOICE FULLY FIXED"));
