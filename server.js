@@ -9,12 +9,12 @@ const io = new Server(server, {
   maxHttpBufferSize: 25 * 1024 * 1024
 });
 
+// rooms structure
 const rooms = {};
-function genRoom() { return Math.random().toString(36).slice(2,9); }
 
-app.get("/", (req,res)=>res.redirect("/room/"+genRoom()));
+app.get("/", (req,res)=>res.redirect("/room/" + Math.random().toString(36).slice(2,9)));
 
-app.get("/room/:id", (req,res)=>{
+app.get("/room/:id",(req,res)=>{
   res.send(`<!DOCTYPE html>
 <html>
 <head>
@@ -62,9 +62,9 @@ button,input[type=file]{padding:6px;border-radius:6px;border:none;background:#11
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io(); // automatically connects to Render host
+const socket = io();
 const room = "${req.params.id}";
-let name = ""; // server will assign if empty
+let name = "";
 
 const videoGrid = document.getElementById("videoGrid");
 const chatOverlay = document.getElementById("chatOverlay");
@@ -72,44 +72,41 @@ const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const msgInput = document.getElementById("msgInput");
 
-let stream;
+let localStream;
 let muted=false;
 let deafened=false;
 const peers={};
 const participantElements={};
 
 // ===== PARTICIPANTS =====
-function addParticipant(id, pname, mstream){
+function addParticipant(id, pname, mstream, isScreen=false){
   let div = participantElements[id];
   if(!div){
-    div = document.createElement("div");
+    div=document.createElement("div");
     div.className="participant"; div.id="p_"+id;
     const video=document.createElement("video"); video.autoplay=true; video.playsInline=true;
-    if(id==="local") video.muted=true;
+    if(id==="local" && !isScreen) video.muted=true;
     div.appendChild(video);
     const label=document.createElement("div"); label.className="name-label"; label.textContent=pname;
     div.appendChild(label);
-    videoGrid.appendChild(div);
+    // screen shares on top
+    if(isScreen){
+      videoGrid.insertBefore(div, videoGrid.firstChild);
+    } else videoGrid.appendChild(div);
     participantElements[id]=div;
   }
   div.querySelector("video").srcObject = mstream;
 }
 function removeParticipant(id){
-  const div=participantElements[id];
+  const div = participantElements[id];
   if(div){ div.remove(); delete participantElements[id]; }
 }
 
 // ===== CHAT =====
-function addMsg(html){
-  const d=document.createElement("div"); d.innerHTML=html;
+function addMsg(html){ const d=document.createElement("div"); d.innerHTML=html;
   chatMessages.appendChild(d); chatMessages.scrollTop=chatMessages.scrollHeight;
 }
-function sendMsg(){
-  if(!msgInput.value.trim()) return;
-  socket.emit("msg",msgInput.value);
-  addMsg("<b>You:</b> "+msgInput.value);
-  msgInput.value="";
-}
+function sendMsg(){ if(!msgInput.value.trim()) return; socket.emit("msg",msgInput.value); addMsg("<b>You:</b> "+msgInput.value); msgInput.value="";}
 msgInput.onkeydown=e=>{if(e.key==="Enter") sendMsg();};
 document.getElementById("sendBtn").onclick=sendMsg;
 document.getElementById("chatToggle").onclick=()=>{chatOverlay.style.display="flex";};
@@ -117,75 +114,83 @@ document.getElementById("chatHeader").onclick=()=>{chatOverlay.style.display="no
 document.getElementById("chatSend").onclick=()=>{
   if(!chatInput.value.trim()) return;
   socket.emit("msg",chatInput.value);
-  addMsg("<b>You:</b> "+chatInput.value);
-  chatInput.value="";
+  addMsg("<b>You:</b> "+chatInput.value); chatInput.value="";
 };
 
 // ===== MEDIA =====
-navigator.mediaDevices.getUserMedia({audio:true,video:true})
-.then(s=>{
-  stream=s;
-  addParticipant("local","You",stream);
+navigator.mediaDevices.getUserMedia({audio:true,video:true}).then(s=>{
+  localStream=s;
+  addParticipant("local","You",localStream);
   socket.emit("join",{room,name});
   initMeter();
-})
-.catch(()=>alert("Mic/Camera denied"));
+}).catch(()=>alert("Mic/Camera denied"));
 
 // MUTE / DEAFEN
 document.getElementById("muteBtn").onclick=()=>{
-  muted=!muted; stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  muted=!muted; localStream.getAudioTracks().forEach(t=>t.enabled=!muted);
   document.getElementById("muteBtn").textContent = muted?"Mic: OFF":"Mic: ON";
 };
 document.getElementById("deafenBtn").onclick=()=>{
-  deafened=!deafened; Object.values(participantElements).forEach(p=>p.querySelector("video").muted=deafened);
+  deafened=!deafened;
+  Object.values(participantElements).forEach(p=>p.querySelector("video").muted=deafened);
   document.getElementById("deafenBtn").textContent = deafened?"Hear: OFF":"Hear: ON";
 };
 
 // SCREEN SHARE
 document.getElementById("screenBtn").onclick=async ()=>{
   try{
-    const sstream = await navigator.mediaDevices.getDisplayMedia({video:true});
-    addParticipant("screen_"+socket.id,name+" (Screen)",sstream);
-    for(const t of sstream.getTracks()) stream.addTrack(t);
+    const sstream=await navigator.mediaDevices.getDisplayMedia({video:true});
+    addParticipant("screen_"+socket.id,name+" (Screen)",sstream,true);
+    // add track to local stream
+    sstream.getTracks().forEach(track=>{
+      for(const pid in peers) peers[pid].addTrack(track, sstream);
+    });
+    // renegotiate
+    for(const pid in peers){
+      const pc=peers[pid];
+      const offer=await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("offer",{to:pid,o:offer});
+    }
     sstream.getVideoTracks()[0].onended=()=>{ 
-      socket.emit("stopScreen"); 
-      removeParticipant("screen_"+socket.id);
+      socket.emit("stopScreen"); removeParticipant("screen_"+socket.id);
     };
-    socket.emit("screenShare");
   }catch(e){console.warn(e);}
 };
 
 // ===== PEERS =====
-function peer(id){
+function createPeer(id){
   const pc=new RTCPeerConnection({
     iceServers:[
       {urls:"stun:stun.l.google.com:19302"},
-      // optional: TURN server for strict NAT
-      // {urls:"turn:numb.viagenie.ca",username:"webrtc",credential:"webrtc"}
+      {urls:"turn:numb.viagenie.ca",username:"webrtc",credential:"webrtc"} // TURN for strict NAT
     ]
   });
   peers[id]=pc;
-  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
   pc.ontrack=e=>addParticipant(id,id,e.streams[0]);
   pc.onicecandidate=e=>{ if(e.candidate) socket.emit("ice",{to:id,c:e.candidate}); };
   return pc;
 }
 
+// ===== SOCKET EVENTS =====
 socket.on("new",async id=>{
-  const pc=peer(id);
+  const pc=createPeer(id);
   const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
   socket.emit("offer",{to:id,o:offer});
 });
+
 socket.on("offer",async d=>{
-  const pc=peer(d.from); await pc.setRemoteDescription(d.o);
+  const pc=createPeer(d.from); await pc.setRemoteDescription(d.o);
   const answer=await pc.createAnswer(); await pc.setLocalDescription(answer);
   socket.emit("answer",{to:d.from,a:answer});
 });
+
 socket.on("answer",d=>peers[d.from].setRemoteDescription(d.a));
 socket.on("ice",d=>peers[d.from]?.addIceCandidate(d.c));
 
-// ===== RECEIVE MESSAGES =====
 socket.on("msg",m=>addMsg("<b>"+m.name+":</b> "+m.text));
+
 socket.on("users",list=>{
   list.forEach(u=>{
     if(u.id!==socket.id) addParticipant(u.id,u.name,participantElements[u.id]?.querySelector("video")?.srcObject || null);
@@ -196,13 +201,11 @@ socket.on("remove",id=>removeParticipant(id));
 // ===== MIC METER =====
 function initMeter(){
   const ctx=new AudioContext();
-  const analyser=ctx.createAnalyser();
-  analyser.fftSize=256;
-  const src=ctx.createMediaStreamSource(stream);
+  const analyser=ctx.createAnalyser(); analyser.fftSize=256;
+  const src=ctx.createMediaStreamSource(localStream);
   src.connect(analyser);
   const data=new Uint8Array(analyser.frequencyBinCount);
-  function tick(){
-    analyser.getByteFrequencyData(data);
+  function tick(){ analyser.getByteFrequencyData(data);
     const avg=data.reduce((a,b)=>a+b,0)/data.length;
     const glow=Math.min(20,avg/4);
     document.getElementById("muteBtn").style.boxShadow="0 0 "+glow+"px lime";
@@ -222,7 +225,7 @@ io.on("connection",s=>{
     s.join(room);
     if(!rooms[room]) rooms[room]={admin:s.id,users:[]};
 
-    // SERVER-ASSIGNED NAME
+    // Assign Guest names if blank
     if(!name || !name.trim()){
       const guestCount = rooms[room].users.filter(u=>u.name.startsWith("Guest")).length + 1;
       name = "Guest "+guestCount;
@@ -253,4 +256,5 @@ io.on("connection",s=>{
   });
 });
 
-server.listen(process.env.PORT || 3000, "0.0.0.0",()=>console.log("✅ Render call server live"));
+// Listen on Render
+server.listen(process.env.PORT || 3000,"0.0.0.0",()=>console.log("✅ Render call server live"));
