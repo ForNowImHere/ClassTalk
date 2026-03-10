@@ -178,6 +178,14 @@ function peer(id){
   const pc=new RTCPeerConnection({
     iceServers:[{urls:"stun:stun.l.google.com:19302"}]
   });
+
+  pc.onconnectionstatechange = () => {
+    console.log("Peer", id, pc.connectionState);
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log("ICE", id, pc.iceConnectionState);
+  };
   peers[id]=pc;
 
   stream.getTracks().forEach(t=>pc.addTrack(t,stream));
