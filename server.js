@@ -1,4 +1,3 @@
-
 const express = require('express');
 const fs = require('fs-extra');
 const path = require('path');
@@ -29,7 +28,7 @@ app.use(express.json());
         try {
           await decompressApp(appName);
         } catch (err) {
-          console.error(❌ Failed to decompress ${appName}:, err.message);
+          console.error(`❌ Failed to decompress ${appName}:`, err.message);
         }
       }
     }
@@ -38,7 +37,7 @@ app.use(express.json());
 
 // 🔳 Home with warning
 app.get('/', (req, res) => {
-  res.send(
+  res.send(`
     <html style="background:#111;color:#eee;font-family:sans-serif">
       <body>
         <h1>Glitchly i dont know why i am proving my self</h1>
@@ -46,7 +45,7 @@ app.get('/', (req, res) => {
         <p>Visit /edit/appname to edit, or /appname to view.</p>
       </body>
     </html>
-  );
+  `);
 });
 
 // 📝 Edit page
@@ -57,12 +56,12 @@ app.get('/edit/:name', async (req, res) => {
   try {
     await fs.ensureDir(appDir);
     if (!(await fs.pathExists(indexFile))) {
-      await fs.writeFile(indexFile, <html><body><h1>Hello from ${req.params.name}!</h1></body></html>);
+      await fs.writeFile(indexFile, `<html><body><h1>Hello from ${req.params.name}!</h1></body></html>`);
     }
 
     const html = await fs.readFile(indexFile, 'utf8');
 
-    res.send(
+    res.send(`
       <html style="background:#111;color:#eee;font-family:sans-serif">
         <body>
           <h2>Editing: ${req.params.name}</h2>
@@ -72,9 +71,9 @@ app.get('/edit/:name', async (req, res) => {
           </form>
         </body>
       </html>
-    );
+    `);
   } catch (err) {
-    res.status(500).send(Error loading editor: ${err.message});
+    res.status(500).send(`Error loading editor: ${err.message}`);
   }
 });
 
@@ -87,9 +86,9 @@ app.post('/edit/:name', async (req, res) => {
     await fs.ensureDir(appDir);
     await fs.writeFile(indexFile, req.body.code || '');
     await compressApp(req.params.name);
-    res.redirect(/edit/${req.params.name});
+    res.redirect(`/edit/${req.params.name}`);
   } catch (err) {
-    res.status(500).send(Error saving: ${err.message});
+    res.status(500).send(`Error saving: ${err.message}`);
   }
 });
 
@@ -97,7 +96,7 @@ app.post('/edit/:name', async (req, res) => {
 app.get('/:name', async (req, res) => {
   const appDir = path.join(PUBLIC_DIR, req.params.name);
   const indexFile = path.join(appDir, 'index.html');
-  const compressed = path.join(STORAGE_DIR, ${req.params.name}.gz);
+  const compressed = path.join(STORAGE_DIR, `${req.params.name}.gz`);
 
   try {
     if (!(await fs.pathExists(appDir))) {
@@ -113,14 +112,14 @@ app.get('/:name', async (req, res) => {
 
     res.sendFile(indexFile);
   } catch (err) {
-    res.status(500).send(Error loading app: ${err.message});
+    res.status(500).send(`Error loading app: ${err.message}`);
   }
 });
 
 // 📦 Compress
 async function compressApp(appName) {
   const src = path.join(PUBLIC_DIR, appName, 'index.html');
-  const dest = path.join(STORAGE_DIR, ${appName}.gz);
+  const dest = path.join(STORAGE_DIR, `${appName}.gz`);
 
   return new Promise((resolve, reject) => {
     const gzip = zlib.createGzip();
@@ -146,7 +145,7 @@ async function compressApp(appName) {
 
 // 🔓 Decompress
 async function decompressApp(appName) {
-  const src = path.join(STORAGE_DIR, ${appName}.gz);
+  const src = path.join(STORAGE_DIR, `${appName}.gz`);
   const destDir = path.join(PUBLIC_DIR, appName);
   const tempFile = path.join(destDir, 'index_temp.html');
   const finalFile = path.join(destDir, 'index.html');
@@ -174,5 +173,5 @@ async function decompressApp(appName) {
 }
 
 app.listen(PORT, () => {
-  console.log(🌐 Glitchly running at http://localhost:${PORT});
+  console.log(`🌐 Glitchly running at http://localhost:${PORT}`);
 });
