@@ -4,248 +4,180 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  maxHttpBufferSize: 25 * 1024 * 1024
-});
+const io = new Server(server, { maxHttpBufferSize: 25 * 1024 * 1024 });
 
 const rooms = {};
-
-function genRoom() {
-  return Math.random().toString(36).slice(2, 9);
-}
+function genRoom() { return Math.random().toString(36).slice(2, 9); }
 
 app.get("/", (req, res) => res.redirect("/room/" + genRoom()));
 
 app.get("/room/:id", (req, res) => {
-res.send(`<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <title>Room ${req.params.id}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-*{box-sizing:border-box}
-body{
-  margin:0;
-  height:100vh;
-  display:flex;
-  background:#0f0f0f;
-  color:white;
-  font-family:Arial;
-}
-#users{
-  width:260px;
-  background:#141414;
-  padding:10px;
-  overflow-y:auto;
-}
-.user{
-  background:#222;
-  padding:8px;
-  border-radius:8px;
-  margin-bottom:8px;
-}
-.admin{color:gold;font-size:0.8em}
-.slider{width:100%}
-
-#main{
-  flex:1;
-  display:flex;
-  flex-direction:column;
-  padding:10px;
-}
-#messages{
-  flex:1;
-  background:#222;
-  border-radius:8px;
-  padding:8px;
-  overflow-y:auto;
-}
-.msg{margin-bottom:8px}
-
-#controls{
-  display:flex;
-  gap:6px;
-  margin-top:8px;
-}
-input,button{
-  background:#111;
-  color:white;
-  border:none;
-  border-radius:6px;
-  padding:8px;
-}
-input{flex:1}
-button{cursor:pointer}
-audio{display:none}
+*{box-sizing:border-box;margin:0;padding:0}
+body{height:100vh;background:#0f0f0f;color:white;font-family:Arial;display:flex;flex-direction:column}
+#videoGrid{flex:1;display:flex;flex-wrap:wrap;gap:6px;padding:6px;overflow:auto}
+.participant{position:relative;background:#222;padding:2px;border-radius:6px;width:180px}
+.participant video{width:100%;border-radius:6px}
+.participant .name-label{text-align:center;margin-top:2px;font-size:0.9em}
+#bottomBar{display:flex;gap:6px;padding:6px;background:#141414;align-items:center}
+input[type=text]{flex:1;padding:6px;border-radius:6px;border:none;background:#111;color:white}
+button,input[type=file]{padding:6px;border-radius:6px;border:none;background:#111;color:white;cursor:pointer}
+#chatOverlay{position:absolute;bottom:60px;right:10px;width:260px;max-height:400px;background:#222;border-radius:8px;display:none;flex-direction:column;overflow:hidden}
+#chatHeader{background:#333;padding:4px;text-align:center;cursor:pointer} 
+#chatMessages{flex:1;padding:4px;overflow-y:auto;font-size:0.85em}
+#chatInputBar{display:flex;gap:4px;padding:4px}
+#chatInputBar input{flex:1;padding:4px;background:#111;color:white;border:none;border-radius:4px}
 </style>
 </head>
-
 <body>
-<div id="users"></div>
 
-<div id="main">
-  <div id="messages"></div>
-  <div id="controls">
-    <input id="input" placeholder="Type message…" />
-    <button onclick="send()">Send</button>
-    <button id="muteBtn" onclick="toggleMute()">Mic: ON</button>
-    <button id="deafenBtn" onclick="toggleDeafen()">Hear: ON</button>
-    <input type="file" id="file">
+<div id="videoGrid"></div>
+
+<div id="chatOverlay">
+  <div id="chatHeader">Chat (click to close)</div>
+  <div id="chatMessages"></div>
+  <div id="chatInputBar">
+    <input id="chatInput" placeholder="Type message...">
+    <button id="chatSend">Send</button>
   </div>
+</div>
+
+<div id="bottomBar">
+  <input type="text" id="msgInput" placeholder="Type message...">
+  <button id="sendBtn">Send</button>
+  <button id="muteBtn">Mic: ON</button>
+  <button id="deafenBtn">Hear: ON</button>
+  <button id="screenBtn">Screen Share</button>
+  <button id="chatToggle">Chat</button>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 const room = "${req.params.id}";
-const name = prompt("Name","Guest") || "Guest";
+const name = prompt("Name","Guest")||"Guest";
 
-const messages = document.getElementById("messages");
-const usersDiv = document.getElementById("users");
-const input = document.getElementById("input");
-const fileInput = document.getElementById("file");
+const videoGrid = document.getElementById("videoGrid");
+const chatOverlay = document.getElementById("chatOverlay");
+const chatMessages = document.getElementById("chatMessages");
+const chatInput = document.getElementById("chatInput");
+const msgInput = document.getElementById("msgInput");
 
 let stream;
 let muted=false;
 let deafened=false;
 const peers={};
+const participantElements={}; // video elements
 
 function addMsg(html){
-  const d=document.createElement("div");
-  d.className="msg";
-  d.innerHTML=html;
-  messages.appendChild(d);
-  messages.scrollTop=messages.scrollHeight;
+  const d=document.createElement("div"); d.innerHTML=html;
+  chatMessages.appendChild(d); chatMessages.scrollTop=chatMessages.scrollHeight;
 }
 
-navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
-  stream=s;
-  socket.emit("join",{room,name});
-  initMeter();
-}).catch(()=>alert("Mic denied"));
+navigator.mediaDevices.getUserMedia({audio:true,video:true})
+  .then(s=>{
+    stream=s;
+    addParticipant("local",name,stream); 
+    socket.emit("join",{room,name});
+    initMeter();
+  }).catch(()=>alert("Mic/Camera denied"));
 
-function send(){
-  if(!input.value.trim()) return;
-  socket.emit("msg",input.value);
-  input.value="";
+function addParticipant(id, pname, mstream){
+  let div=participantElements[id];
+  if(!div){
+    div=document.createElement("div"); div.className="participant"; div.id="p_"+id;
+    const video=document.createElement("video"); video.autoplay=true; video.playsInline=true; 
+    if(id==="local") video.muted=true;
+    div.appendChild(video);
+    const label=document.createElement("div"); label.className="name-label"; label.textContent=pname;
+    div.appendChild(label);
+    videoGrid.appendChild(div);
+    participantElements[id]=div;
+  }
+  div.querySelector("video").srcObject=mstream;
 }
 
-input.onkeydown=e=>{ if(e.key==="Enter") send(); };
+// MESSAGE SEND
+function sendMsg(){
+  if(!msgInput.value.trim()) return;
+  socket.emit("msg",msgInput.value);
+  addMsg("<b>You:</b> "+msgInput.value);
+  msgInput.value="";
+}
+msgInput.onkeydown=e=>{if(e.key==="Enter") sendMsg();};
+document.getElementById("sendBtn").onclick=sendMsg;
 
-fileInput.onchange=()=>{
-  const f=fileInput.files[0];
-  if(!f || f.size>8*1024*1024) return alert("8MB max");
-  const r=new FileReader();
-  r.onload=()=>socket.emit("file",{
-    name:f.name,
-    type:f.type,
-    data:r.result
-  });
-  r.readAsDataURL(f);
-  fileInput.value="";
+// CHAT OVERLAY
+document.getElementById("chatToggle").onclick=()=>{chatOverlay.style.display="flex";};
+document.getElementById("chatHeader").onclick=()=>{chatOverlay.style.display="none";};
+document.getElementById("chatSend").onclick=()=>{
+  if(!chatInput.value.trim()) return;
+  socket.emit("msg",chatInput.value);
+  addMsg("<b>You:</b> "+chatInput.value);
+  chatInput.value="";
 };
 
-socket.on("msg",m=>{
-  addMsg("<b>"+m.name+":</b> "+m.text);
-});
+// MUTE/DEAFEN
+document.getElementById("muteBtn").onclick=()=>{
+  muted=!muted; stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  document.getElementById("muteBtn").textContent = muted ? "Mic: OFF" : "Mic: ON";
+};
+document.getElementById("deafenBtn").onclick=()=>{
+  deafened=!deafened; Object.values(participantElements).forEach(p=>p.querySelector("video").muted=deafened);
+  document.getElementById("deafenBtn").textContent = deafened ? "Hear: OFF" : "Hear: ON";
+};
 
-socket.on("file",m=>{
-  if(m.type.startsWith("image/")){
-    addMsg("<b>"+m.name+":</b><br><img src='"+m.data+"' style='max-width:220px;border-radius:6px'>");
-  } else {
-    addMsg("<b>"+m.name+":</b> <a href='"+m.data+"' download='"+m.file+"'>Download</a>");
-  }
-});
+// SCREEN SHARE
+document.getElementById("screenBtn").onclick=async ()=>{
+  try{
+    const sstream = await navigator.mediaDevices.getDisplayMedia({video:true});
+    addParticipant("screen_"+socket.id,name+" (Screen)",sstream);
+    for(const t of sstream.getTracks()) stream.addTrack(t); // add to outgoing tracks
+    sstream.getVideoTracks()[0].onended=()=>{ socket.emit("stopScreen"); removeParticipant("screen_"+socket.id); };
+    socket.emit("screenShare"); // notify others
+  }catch(e){console.warn(e);}
+};
 
-socket.on("users",list=>{
-  usersDiv.innerHTML="";
-  list.forEach(u=>{
-    const d=document.createElement("div");
-    d.className="user";
-    d.innerHTML=\`
-      <b>\${u.name}</b> \${u.admin?"<span class='admin'>(admin)</span>":""}
-      <input class="slider" type="range" min="0" max="1" step="0.01"
-        oninput="setVol('\${u.id}',this.value)">
-    \`;
-    usersDiv.appendChild(d);
-  });
-});
+function removeParticipant(id){
+  const div=participantElements[id];
+  if(div){ div.remove(); delete participantElements[id]; }
+}
 
-/* ===== VOICE ===== */
-
+// VOICE PEERS
 function peer(id){
-  const pc=new RTCPeerConnection({
-    iceServers:[{urls:"stun:stun.l.google.com:19302"}]
-  });
+  const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
   peers[id]=pc;
-
   stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
-  pc.ontrack=e=>{
-    let a=document.getElementById("a_"+id);
-    if(!a){
-      a=document.createElement("audio");
-      a.id="a_"+id;
-      a.autoplay=true;
-      document.body.appendChild(a);
-    }
-    a.srcObject=e.streams[0];
-  };
+  pc.ontrack=e=>addParticipant(id, id, e.streams[0]);
 
-  pc.onicecandidate=e=>{
-    if(e.candidate) socket.emit("ice",{to:id,c:e.candidate});
-  };
-
+  pc.onicecandidate=e=>{ if(e.candidate) socket.emit("ice",{to:id,c:e.candidate}); };
   return pc;
 }
 
 socket.on("new",async id=>{
   const pc=peer(id);
-  const offer=await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
   socket.emit("offer",{to:id,o:offer});
 });
-
 socket.on("offer",async d=>{
-  const pc=peer(d.from);
-  await pc.setRemoteDescription(d.o);
-  const a=await pc.createAnswer();
-  await pc.setLocalDescription(a);
-  socket.emit("answer",{to:d.from,a});
+  const pc=peer(d.from); await pc.setRemoteDescription(d.o);
+  const answer=await pc.createAnswer(); await pc.setLocalDescription(answer);
+  socket.emit("answer",{to:d.from,a:answer});
 });
+socket.on("answer",d=>peers[d.from].setRemoteDescription(d.a));
+socket.on("ice",d=>peers[d.from]?.addIceCandidate(d.c));
 
-socket.on("answer",d=>{
-  peers[d.from].setRemoteDescription(d.a);
-});
-
-socket.on("ice",d=>{
-  peers[d.from]?.addIceCandidate(d.c);
-});
-
-/* ===== MUTE / DEAFEN ===== */
-
-function toggleMute(){
-  muted=!muted;
-  stream.getAudioTracks().forEach(t=>t.enabled=!muted);
-  document.getElementById("muteBtn").textContent =
-    muted ? "Mic: OFF" : "Mic: ON";
-}
-
-function toggleDeafen(){
-  deafened=!deafened;
-  document.querySelectorAll("audio").forEach(a=>a.muted=deafened);
-  document.getElementById("deafenBtn").textContent =
-    deafened ? "Hear: OFF" : "Hear: ON";
-}
-
-function setVol(id,v){
-  const a=document.getElementById("a_"+id);
-  if(a) a.volume=v;
-}
+// MESSAGES
+socket.on("msg",m=>addMsg("<b>"+m.name+":</b> "+m.text));
 
 /* ===== MIC METER ===== */
-
 function initMeter(){
   const ctx=new AudioContext();
   const analyser=ctx.createAnalyser();
@@ -253,13 +185,11 @@ function initMeter(){
   const src=ctx.createMediaStreamSource(stream);
   src.connect(analyser);
   const data=new Uint8Array(analyser.frequencyBinCount);
-
   function tick(){
     analyser.getByteFrequencyData(data);
     const avg=data.reduce((a,b)=>a+b,0)/data.length;
     const glow=Math.min(20,avg/4);
-    document.getElementById("muteBtn").style.boxShadow =
-      "0 0 "+glow+"px lime";
+    document.getElementById("muteBtn").style.boxShadow="0 0 "+glow+"px lime";
     requestAnimationFrame(tick);
   }
   document.body.onclick=()=>ctx.resume();
@@ -270,42 +200,36 @@ function initMeter(){
 </html>`);
 });
 
-/* ===== SERVER SOCKET ===== */
-
-io.on("connection",s=>{
-  s.on("join",({room,name})=>{
+// SERVER SOCKET LOGIC
+io.on("connection", s=>{
+  s.on("join", ({room,name})=>{
     s.join(room);
-    if(!rooms[room]) rooms[room]={admin:s.id,users:[]};
+    if(!rooms[room]) rooms[room]={admin:s.id, users:[]};
     rooms[room].users.push({id:s.id,name,admin:s.id===rooms[room].admin});
     s.to(room).emit("new",s.id);
-    io.to(room).emit("users",rooms[room].users);
+    io.to(room).emit("users", rooms[room].users);
   });
 
-  s.on("msg",text=>{
-    const room=[...s.rooms].find(r=>r!==s.id);
-    if(!room) return;
+  s.on("msg", text=>{
+    const room=[...s.rooms].find(r=>r!==s.id); if(!room) return;
     const user=rooms[room].users.find(u=>u.id===s.id);
     io.to(room).emit("msg",{name:user.name,text});
   });
 
-  s.on("file",f=>{
-    const room=[...s.rooms].find(r=>r!==s.id);
-    if(!room) return;
-    const user=rooms[room].users.find(u=>u.id===s.id);
-    io.to(room).emit("file",{name:user.name,type:f.type,data:f.data,file:f.name});
-  });
+  s.on("screenShare", ()=> s.to([...s.rooms][1]).emit("newScreen",s.id));
 
-  s.on("offer",d=>s.to(d.to).emit("offer",{from:s.id,o:d.o}));
-  s.on("answer",d=>s.to(d.to).emit("answer",{from:s.id,a:d.a}));
-  s.on("ice",d=>s.to(d.to).emit("ice",{from:s.id,c:d.c}));
+  s.on("offer", d=>s.to(d.to).emit("offer",{from:s.id,o:d.o}));
+  s.on("answer", d=>s.to(d.to).emit("answer",{from:s.id,a:d.a}));
+  s.on("ice", d=>s.to(d.to).emit("ice",{from:s.id,c:d.c}));
 
-  s.on("disconnect",()=>{
+  s.on("disconnect", ()=>{
     for(const r in rooms){
       rooms[r].users=rooms[r].users.filter(u=>u.id!==s.id);
-      io.to(r).emit("users",rooms[r].users);
+      io.to(r).emit("users", rooms[r].users);
+      io.to(r).emit("remove", s.id);
       if(!rooms[r].users.length) delete rooms[r];
     }
   });
 });
 
-server.listen(3000,()=>console.log("✅ CHAT + VOICE FULLY FIXED"));
+server.listen(3000,()=>console.log("✅ CHAT + VOICE + SCREEN SHARE READY"));
