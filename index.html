@@ -1,36 +1,590 @@
-<!DOCTYPE html>
+const express=require("express");
+const http=require("http");
+const {Server}=require("socket.io");
+
+const app=express();
+const server=http.createServer(app);
+const io=new Server(server,{maxHttpBufferSize:25*1024*1024});
+
+const rooms={};
+
+function genRoom(){
+return Math.random().toString(36).substring(2,10);
+}
+
+/* ================= CREATE ROOM PAGE ================= */
+
+app.get("/",(req,res)=>{
+
+res.send(`<!DOCTYPE html>
 <html>
 <head>
-    <title>Create Room</title>
+<title>Create Room</title>
+
+<style>
+
+body{
+background:#0f0f0f;
+color:white;
+font-family:Arial;
+display:flex;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+height:100vh;
+}
+
+input,button{
+margin:6px;
+padding:10px;
+border-radius:8px;
+border:none;
+background:#222;
+color:white;
+}
+
+button{cursor:pointer}
+
+</style>
 </head>
+
 <body>
-    <h1>Create a Video Chat Room</h1>
-    <input type="text" id="username" placeholder="Enter your name" />
-    <input type="file" id="profilePic" accept="image/*" />
-    <button onclick="createRoom()">Create Room</button>
 
-    <script>
-        function createRoom() {
-            const username = document.getElementById('username').value;
-            const profilePicInput = document.getElementById('profilePic');
-            const reader = new FileReader();
+<h1>Create Video Chat Room</h1>
 
-            reader.onload = () => {
-                const profilePic = reader.result;
-                const roomId = Math.random().toString(36).substring(2, 10);
-                localStorage.setItem('user', JSON.stringify({ name: username, profilePic }));
-                window.location.href = `/room/${roomId}`;
-            };
+<input id="username" placeholder="Name">
+<input type="file" id="profilePic" accept="image/*">
 
-            if (profilePicInput.files[0]) {
-                reader.readAsDataURL(profilePicInput.files[0]);
-            } else {
-                const profilePic = '';
-                const roomId = Math.random().toString(36).substring(2, 10);
-                localStorage.setItem('user', JSON.stringify({ name: username, profilePic }));
-                window.location.href = `/room/${roomId}`;
-            }
-        }
-    </script>
+<button onclick="createRoom()">Create Room</button>
+
+<script>
+
+function createRoom(){
+
+const username=document.getElementById("username").value||"Guest";
+const pic=document.getElementById("profilePic");
+
+const reader=new FileReader();
+
+reader.onload=()=>{
+
+const profilePic=reader.result;
+
+const roomId=Math.random().toString(36).substring(2,10);
+
+localStorage.setItem("user",JSON.stringify({
+name:username,
+profilePic
+}));
+
+window.location="/room/"+roomId;
+
+};
+
+if(pic.files[0])
+reader.readAsDataURL(pic.files[0]);
+else reader.onload();
+
+}
+
+</script>
+
 </body>
-</html>
+</html>`);
+
+});
+
+/* ================= ROOM PAGE ================= */
+
+app.get("/room/:id",(req,res)=>{
+
+res.send(`<!DOCTYPE html>
+<html>
+<head>
+
+<meta charset="UTF-8">
+<title>Room ${req.params.id}</title>
+
+<style>
+
+body{
+margin:0;
+background:#0f0f0f;
+color:white;
+font-family:Arial;
+overflow:hidden;
+}
+
+/* VIDEO GRID */
+
+#videoGrid{
+position:absolute;
+top:0;
+left:0;
+right:0;
+bottom:60px;
+
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+gap:8px;
+padding:10px;
+}
+
+.tile{
+position:relative;
+background:black;
+border-radius:10px;
+overflow:hidden;
+}
+
+video{
+width:100%;
+height:100%;
+object-fit:cover;
+}
+
+.nameTag{
+position:absolute;
+bottom:8px;
+left:8px;
+background:rgba(0,0,0,0.6);
+padding:4px 8px;
+border-radius:6px;
+font-size:12px;
+display:flex;
+align-items:center;
+gap:6px;
+}
+
+.nameTag img{
+width:20px;
+height:20px;
+border-radius:50%;
+}
+
+/* CHAT */
+
+#chatOverlay{
+position:absolute;
+top:0;
+left:0;
+right:0;
+bottom:0;
+background:rgba(0,0,0,0.7);
+display:none;
+justify-content:center;
+align-items:center;
+}
+
+#chatBox{
+width:500px;
+height:500px;
+background:#222;
+border-radius:10px;
+display:flex;
+flex-direction:column;
+}
+
+#messages{
+flex:1;
+overflow-y:auto;
+padding:10px;
+}
+
+#chatInput{
+display:flex;
+gap:6px;
+padding:10px;
+}
+
+input{
+flex:1;
+padding:8px;
+border:none;
+background:#111;
+color:white;
+border-radius:6px;
+}
+
+/* BOTTOM BAR */
+
+#bottomBar{
+position:absolute;
+bottom:0;
+left:0;
+right:0;
+height:60px;
+background:#151515;
+display:flex;
+justify-content:center;
+align-items:center;
+gap:12px;
+}
+
+button{
+padding:10px 14px;
+background:#222;
+border:none;
+color:white;
+border-radius:8px;
+cursor:pointer;
+}
+
+audio{display:none}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="videoGrid"></div>
+
+<div id="chatOverlay">
+
+<div id="chatBox">
+
+<div id="messages"></div>
+
+<div id="chatInput">
+<input id="input" placeholder="message">
+<button onclick="send()">Send</button>
+</div>
+
+</div>
+
+</div>
+
+<div id="bottomBar">
+
+<button onclick="toggleChat()">💬</button>
+<button onclick="toggleMute()" id="muteBtn">🎤</button>
+<button onclick="startCam()">📷</button>
+<button onclick="shareScreen()">🖥️</button>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+
+const socket=io();
+const room="${req.params.id}";
+
+const user=JSON.parse(localStorage.getItem("user"))||{
+name:"Guest",
+profilePic:""
+};
+
+const peers={};
+const users={};
+
+let audioStream;
+
+const videoGrid=document.getElementById("videoGrid");
+
+/* ===== AUDIO ===== */
+
+navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
+audioStream=s;
+socket.emit("join",{room,name:user.name,profilePic:user.profilePic});
+});
+
+/* ===== CHAT ===== */
+
+function toggleChat(){
+
+const chat=document.getElementById("chatOverlay");
+
+chat.style.display=
+chat.style.display==="flex"?"none":"flex";
+
+}
+
+function send(){
+
+const input=document.getElementById("input");
+
+if(!input.value.trim())return;
+
+socket.emit("msg",input.value);
+
+input.value="";
+
+}
+
+socket.on("msg",m=>{
+
+const div=document.createElement("div");
+
+div.innerHTML="<b>"+m.name+":</b> "+m.text;
+
+document.getElementById("messages").appendChild(div);
+
+});
+
+/* ===== VIDEO TILE ===== */
+
+function createTile(id,name,pic){
+
+let tile=document.createElement("div");
+tile.className="tile";
+tile.id="tile_"+id;
+
+let video=document.createElement("video");
+video.autoplay=true;
+video.playsInline=true;
+
+let tag=document.createElement("div");
+tag.className="nameTag";
+
+if(pic){
+const img=document.createElement("img");
+img.src=pic;
+tag.appendChild(img);
+}
+
+tag.append(name);
+
+tile.appendChild(video);
+tile.appendChild(tag);
+
+videoGrid.appendChild(tile);
+
+return video;
+
+}
+
+/* ===== PEER ===== */
+
+function peer(id){
+
+const pc=new RTCPeerConnection({
+
+iceServers:[
+{urls:"stun:stun.l.google.com:19302"},
+{urls:"stun:stun1.l.google.com:19302"},
+{urls:"stun:stun2.l.google.com:19302"}
+]
+
+});
+
+peers[id]=pc;
+
+audioStream.getTracks().forEach(t=>pc.addTrack(t,audioStream));
+
+pc.ontrack=e=>{
+
+let tile=document.getElementById("tile_"+id);
+
+if(!tile){
+
+const video=createTile(id,users[id].name,users[id].profilePic);
+
+video.srcObject=e.streams[0];
+
+}else{
+
+tile.querySelector("video").srcObject=e.streams[0];
+
+}
+
+};
+
+pc.onicecandidate=e=>{
+if(e.candidate)
+socket.emit("ice",{to:id,c:e.candidate});
+};
+
+return pc;
+
+}
+
+/* ===== PEERS ===== */
+
+socket.on("peers",async list=>{
+
+for(const id of list){
+
+const pc=peer(id);
+
+const offer=await pc.createOffer();
+
+await pc.setLocalDescription(offer);
+
+socket.emit("offer",{to:id,o:offer});
+
+}
+
+});
+
+socket.on("new",async id=>{
+
+const pc=peer(id);
+
+const offer=await pc.createOffer();
+
+await pc.setLocalDescription(offer);
+
+socket.emit("offer",{to:id,o:offer});
+
+});
+
+/* ===== SIGNAL ===== */
+
+socket.on("offer",async d=>{
+
+const pc=peer(d.from);
+
+await pc.setRemoteDescription(d.o);
+
+const ans=await pc.createAnswer();
+
+await pc.setLocalDescription(ans);
+
+socket.emit("answer",{to:d.from,a:ans});
+
+});
+
+socket.on("answer",d=>{
+peers[d.from].setRemoteDescription(d.a);
+});
+
+socket.on("ice",d=>{
+peers[d.from]?.addIceCandidate(d.c);
+});
+
+/* ===== USERS ===== */
+
+socket.on("users",list=>{
+
+list.forEach(u=>{
+users[u.id]=u;
+});
+
+});
+
+/* ===== CAMERA ===== */
+
+async function startCam(){
+
+const cam=await navigator.mediaDevices.getUserMedia({
+
+video:{
+width:320,
+height:240,
+frameRate:10
+}
+
+});
+
+const track=cam.getVideoTracks()[0];
+
+for(const id in peers)
+peers[id].addTrack(track,cam);
+
+}
+
+/* ===== SCREEN SHARE ===== */
+
+async function shareScreen(){
+
+const scr=await navigator.mediaDevices.getDisplayMedia({
+
+video:{frameRate:5}
+
+});
+
+const track=scr.getVideoTracks()[0];
+
+for(const id in peers)
+peers[id].addTrack(track,scr);
+
+}
+
+/* ===== MUTE ===== */
+
+let muted=false;
+
+function toggleMute(){
+
+muted=!muted;
+
+audioStream.getAudioTracks().forEach(t=>{
+t.enabled=!muted;
+});
+
+document.getElementById("muteBtn").innerText=
+muted?"🔇":"🎤";
+
+}
+
+</script>
+
+</body>
+</html>`);
+
+});
+
+/* ================= SOCKET ================= */
+
+io.on("connection",s=>{
+
+s.on("join",({room,name,profilePic})=>{
+
+s.join(room);
+
+if(!rooms[room])
+rooms[room]={users:[]};
+
+rooms[room].users.push({
+id:s.id,
+name,
+profilePic
+});
+
+const others=rooms[room].users
+.filter(u=>u.id!==s.id)
+.map(u=>u.id);
+
+s.emit("peers",others);
+
+s.to(room).emit("new",s.id);
+
+io.to(room).emit("users",rooms[room].users);
+
+});
+
+s.on("msg",text=>{
+
+const room=[...s.rooms].find(r=>r!==s.id);
+if(!room)return;
+
+const user=rooms[room].users.find(u=>u.id===s.id);
+
+io.to(room).emit("msg",{name:user.name,text});
+
+});
+
+s.on("offer",d=>s.to(d.to).emit("offer",{from:s.id,o:d.o}));
+s.on("answer",d=>s.to(d.to).emit("answer",{from:s.id,a:d.a}));
+s.on("ice",d=>s.to(d.to).emit("ice",{from:s.id,c:d.c}));
+
+s.on("disconnect",()=>{
+
+for(const r in rooms){
+
+rooms[r].users=rooms[r].users.filter(u=>u.id!==s.id);
+
+io.to(r).emit("users",rooms[r].users);
+
+if(!rooms[r].users.length)
+delete rooms[r];
+
+}
+
+});
+
+});
+
+server.listen(3000,()=>console.log("Video chat server running"));
