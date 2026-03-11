@@ -165,13 +165,19 @@ padding:5px
 <div id="videoGrid"></div>
 
 <div id="chatOverlay">
-<div id="chatHeader">Chat (click to close)</div>
+
+<div id="chatHeader">
+<span>Chat</span>
+<button id="chatClose">×</button>
+</div>
+
 <div id="chatMessages"></div>
 
 <div id="chatInputBar">
-<input id="chatInput">
+<input id="chatInput" placeholder="message">
 <button id="chatSend">Send</button>
 </div>
+
 </div>
 
 <div id="bottomBar">
@@ -420,7 +426,7 @@ document.getElementById("chatToggle").onclick=()=>{
 chat.style.display="flex"
 }
 
-document.getElementById("chatHeader").onclick=()=>{
+document.getElementById("chatClose").onclick=()=>{
 chat.style.display="none"
 }
 
