@@ -100,21 +100,35 @@ border-radius:6px
 }
 
 #chatOverlay{
-position:absolute;
+position:fixed;
 bottom:70px;
-right:10px;
-width:520px;
-height:420px;
-background:#222;
-border-radius:10px;
+right:15px;
+width:260px;
+height:340px;
+background:#1b1b1b;
+border-radius:18px;
+box-shadow:0 10px 25px rgba(0,0,0,.4);
 display:none;
-flex-direction:column
+flex-direction:column;
+overflow:hidden
 }
 
 #chatHeader{
-background:#333;
-padding:6px;
-text-align:center;
+background:#2a2a2a;
+padding:8px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+font-size:0.9em
+}
+
+#chatClose{
+background:#444;
+border:none;
+color:white;
+border-radius:50%;
+width:20px;
+height:20px;
 cursor:pointer
 }
 
@@ -122,22 +136,31 @@ cursor:pointer
 flex:1;
 padding:8px;
 overflow:auto;
-font-size:0.9em
+font-size:0.85em
+}
+
+.chatMsg{
+padding:5px 7px;
+border-radius:10px;
+margin-bottom:5px;
+background:#2e2e2e
 }
 
 #chatInputBar{
 display:flex;
-gap:6px;
-padding:6px
+gap:4px;
+padding:6px;
+border-top:1px solid #333
 }
 
 #chatInputBar input{
-flex:1
+flex:1;
+background:#111;
+color:white;
+border:none;
+border-radius:6px;
+padding:5px
 }
-</style>
-</head>
-
-<body>
 
 <div id="videoGrid"></div>
 
