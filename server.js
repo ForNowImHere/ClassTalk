@@ -105,7 +105,7 @@ res.send(`
 <style>
 
 body{
-background:#111;
+background:#0f0f0f;
 color:white;
 margin:0;
 font-family:sans-serif;
@@ -114,24 +114,97 @@ flex-direction:column;
 height:100vh
 }
 
+/* video grid */
+
 #videos{
 flex:1;
 display:flex;
 flex-wrap:wrap;
-gap:10px;
-padding:10px;
-justify-content:center
+gap:12px;
+padding:12px;
+justify-content:center;
+align-content:flex-start
 }
 
 video{
-width:300px;
+width:260px;
 background:black;
-border-radius:10px
+border-radius:14px;
+box-shadow:0 6px 18px rgba(0,0,0,.5)
 }
 
+/* bottom bar */
+
 #controls{
-padding:10px;
-background:#222
+background:#141414;
+padding:12px;
+display:flex;
+gap:10px;
+justify-content:center;
+border-top:1px solid #222
+}
+
+button{
+background:#1e1e1e;
+border:none;
+color:white;
+padding:10px 16px;
+border-radius:12px;
+cursor:pointer;
+font-size:14px;
+transition:.15s
+}
+
+button:hover{
+background:#2b2b2b
+}
+
+/* chat button */
+
+#chatToggle{
+position:fixed;
+bottom:80px;
+right:20px;
+background:#4a6cff;
+border-radius:20px
+}
+
+/* chat popup */
+
+#chatBox{
+position:fixed;
+bottom:130px;
+right:20px;
+width:260px;
+height:320px;
+background:#1a1a1a;
+border-radius:16px;
+box-shadow:0 10px 25px rgba(0,0,0,.5);
+display:none;
+flex-direction:column;
+overflow:hidden
+}
+
+#chatHeader{
+background:#4a6cff;
+padding:8px;
+display:flex;
+justify-content:space-between
+}
+
+#messages{
+flex:1;
+padding:8px;
+overflow-y:auto;
+font-size:13px
+}
+
+#chatInput{
+border:none;
+padding:8px;
+outline:none;
+background:#111;
+color:white
 }
 
 </style>
@@ -143,16 +216,33 @@ background:#222
 <div id="videos"></div>
 
 <div id="controls">
-Room: ${room}
-<button onclick="leave()">Leave</button>
+
+<button id="micBtn">🎤 Mic</button>
+<button id="camBtn">📷 Cam</button>
+<button onclick="leave()">🚪 Leave</button>
+
+</div>
+
+<button id="chatToggle">💬 Chat</button>
+
+<div id="chatBox">
+
+<div id="chatHeader">
+Chat
+<button onclick="closeChat()">X</button>
+</div>
+
+<div id="messages"></div>
+
+<input id="chatInput" placeholder="message">
+
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
 
-const socket = io()
-
+const socket=io()
 const room="${room}"
 
 const peers={}
@@ -255,6 +345,18 @@ delete peers[id]
 
 function leave(){
 location.href="/"
+}
+
+/* chat UI */
+
+const chat=document.getElementById("chatBox")
+
+document.getElementById("chatToggle").onclick=()=>{
+chat.style.display="flex"
+}
+
+function closeChat(){
+chat.style.display="none"
 }
 
 </script>
