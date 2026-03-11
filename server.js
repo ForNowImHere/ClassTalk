@@ -6,15 +6,15 @@ const app = express()
 const server = http.createServer(app)
 const io = new Server(server)
 
-const rooms = {}
+const users = {}
 
 app.get("/", (req,res)=>{
-res.send(`
 
+res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>Lobby</title>
+<title>Join Room</title>
 
 <style>
 
@@ -22,10 +22,10 @@ body{
 background:#0f0f0f;
 color:white;
 font-family:Arial;
-height:100vh;
 display:flex;
 align-items:center;
-justify-content:center
+justify-content:center;
+height:100vh
 }
 
 #box{
@@ -35,10 +35,10 @@ border-radius:20px;
 display:flex;
 flex-direction:column;
 gap:10px;
-width:300px
+width:320px
 }
 
-input{
+input,select{
 padding:10px;
 border-radius:10px;
 border:none;
@@ -55,8 +55,10 @@ color:white;
 cursor:pointer
 }
 
-button:hover{
-background:#333
+video{
+width:100%;
+border-radius:12px;
+background:black
 }
 
 </style>
@@ -68,35 +70,83 @@ background:#333
 
 <h2>Join Room</h2>
 
-<input id="code" placeholder="Room Code">
+<input id="name" placeholder="Your name">
 
-<button onclick="join()">Join / Create</button>
+<input id="room" placeholder="Room code">
 
-<button onclick="random()">Random Room</button>
+<select id="mic"></select>
+<select id="cam"></select>
+
+<video id="preview" autoplay muted></video>
+
+<button onclick="join()">Join</button>
 
 </div>
 
 <script>
 
+let stream
+
+async function init(){
+
+const devices = await navigator.mediaDevices.enumerateDevices()
+
+const micSel = document.getElementById("mic")
+const camSel = document.getElementById("cam")
+
+devices.forEach(d=>{
+if(d.kind==="audioinput"){
+const o=document.createElement("option")
+o.value=d.deviceId
+o.text=d.label || "Mic"
+micSel.appendChild(o)
+}
+if(d.kind==="videoinput"){
+const o=document.createElement("option")
+o.value=d.deviceId
+o.text=d.label || "Camera"
+camSel.appendChild(o)
+}
+})
+
+startPreview()
+
+micSel.onchange=startPreview
+camSel.onchange=startPreview
+}
+
+async function startPreview(){
+
+if(stream) stream.getTracks().forEach(t=>t.stop())
+
+stream = await navigator.mediaDevices.getUserMedia({
+audio:{deviceId:mic.value},
+video:{deviceId:cam.value}
+})
+
+preview.srcObject=stream
+}
+
 function join(){
-let code=document.getElementById("code").value.trim()
 
-if(!code) code=Math.random().toString(36).substring(2,7)
+const name=document.getElementById("name").value.trim()
+let room=document.getElementById("room").value.trim()
 
-location.href="/room/"+code
+if(!name) return alert("enter name")
+
+if(!room) room=Math.random().toString(36).slice(2,7)
+
+location.href="/room/"+room+"?name="+encodeURIComponent(name)
 }
 
-function random(){
-let code=Math.random().toString(36).substring(2,7)
-location.href="/room/"+code
-}
+init()
 
 </script>
 
 </body>
 </html>
-
 `)
+
 })
 
 app.get("/room/:id",(req,res)=>{
@@ -106,133 +156,89 @@ res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>Room ${req.params.id}</title>
 
 <style>
 
-*{box-sizing:border-box;margin:0;padding:0}
-
 body{
-height:100vh;
+margin:0;
 background:#0f0f0f;
 color:white;
 font-family:Arial;
+height:100vh;
 display:flex;
-flex-direction:column;
-overflow:hidden
+flex-direction:column
 }
 
-#videoGrid{
+#grid{
 flex:1;
 display:flex;
 flex-wrap:wrap;
-gap:8px;
-padding:8px;
-overflow:auto;
+gap:10px;
+padding:10px;
 justify-content:center
 }
 
-.participant{
-background:#222;
-border-radius:12px;
+.user{
+background:#1f1f1f;
+border-radius:16px;
 padding:6px;
-width:220px
-}
-
-.participant video{
-width:100%;
-border-radius:8px
-}
-
-.name-label{
+width:220px;
 text-align:center;
-font-size:0.9em;
+position:relative
+}
+
+.user video{
+width:100%;
+border-radius:12px
+}
+
+.avatar{
+width:100%;
+height:120px;
+border-radius:12px;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:50px;
+background:#333
+}
+
+.name{
 margin-top:4px
 }
 
-#bottomBar{
+.speaking{
+box-shadow:0 0 15px lime
+}
+
+#bar{
 display:flex;
-gap:8px;
+gap:10px;
 padding:10px;
 background:#141414
 }
 
 button{
-background:#111;
-border:none;
-color:white;
 padding:10px;
+border:none;
 border-radius:10px;
-cursor:pointer
-}
-
-button:hover{
-background:#222
-}
-
-#chatOverlay{
-position:absolute;
-bottom:80px;
-right:10px;
-width:420px;
-height:320px;
 background:#222;
-border-radius:14px;
-display:none;
-flex-direction:column
-}
-
-#chatHeader{
-background:#333;
-padding:6px;
-text-align:center;
-cursor:pointer
-}
-
-#chatMessages{
-flex:1;
-padding:8px;
-overflow:auto
-}
-
-#chatInputBar{
-display:flex;
-gap:6px;
-padding:6px
-}
-
-#chatInputBar input{
-flex:1
+color:white
 }
 
 </style>
+
 </head>
 
 <body>
 
-<div id="videoGrid"></div>
+<div id="grid"></div>
 
-<div id="chatOverlay">
+<div id="bar">
 
-<div id="chatHeader">Chat (click to close)</div>
-
-<div id="chatMessages"></div>
-
-<div id="chatInputBar">
-<input id="chatInput">
-<button id="chatSend">Send</button>
-</div>
-
-</div>
-
-<div id="bottomBar">
-
-<button id="muteBtn">Mic</button>
+<button id="micBtn">Mic</button>
 <button id="camBtn">Cam</button>
-<button id="screenBtn">Screen</button>
-<button id="chatToggle">Chat</button>
-<button id="leaveBtn">Leave</button>
+<button id="leave">Leave</button>
 
 </div>
 
@@ -241,45 +247,100 @@ flex:1
 <script>
 
 const socket = io()
-const room = "${req.params.id}"
 
-socket.emit("join",room)
+const url=new URL(location.href)
+const name=url.searchParams.get("name")
 
-const chat=document.getElementById("chatOverlay")
+const room="${req.params.id}"
 
-document.getElementById("chatToggle").onclick=()=>{
-chat.style.display="flex"
+socket.emit("join",{room,name})
+
+const grid=document.getElementById("grid")
+
+const peers={}
+const users={}
+
+let stream
+
+navigator.mediaDevices.getUserMedia({video:true,audio:true})
+.then(s=>{
+
+stream=s
+addUser("self",name,s)
+
+socket.emit("ready")
+
+})
+
+function addUser(id,name,stream){
+
+if(users[id]) return
+
+const div=document.createElement("div")
+div.className="user"
+div.id=id
+
+let vid
+
+if(stream){
+
+vid=document.createElement("video")
+vid.srcObject=stream
+vid.autoplay=true
+vid.playsInline=true
+
+div.appendChild(vid)
+
+}else{
+
+const a=document.createElement("div")
+a.className="avatar"
+a.textContent=name[0].toUpperCase()
+
+div.appendChild(a)
+
 }
 
-document.getElementById("chatHeader").onclick=()=>{
-chat.style.display="none"
+const n=document.createElement("div")
+n.className="name"
+n.textContent=name
+
+div.appendChild(n)
+
+grid.appendChild(div)
+
+users[id]=div
+
 }
 
-document.getElementById("leaveBtn").onclick=()=>{
+socket.on("user",u=>{
+addUser(u.id,u.name)
+})
+
+socket.on("leave",id=>{
+users[id]?.remove()
+delete users[id]
+})
+
+document.getElementById("leave").onclick=()=>{
 location.href="/"
 }
 
-const chatInput=document.getElementById("chatInput")
-const chatMessages=document.getElementById("chatMessages")
+const micBtn=document.getElementById("micBtn")
+const camBtn=document.getElementById("camBtn")
 
-document.getElementById("chatSend").onclick=send
+let mic=true
+let cam=true
 
-chatInput.onkeydown=e=>{
-if(e.key==="Enter") send()
+micBtn.onclick=()=>{
+mic=!mic
+stream.getAudioTracks()[0].enabled=mic
 }
 
-function send(){
-if(!chatInput.value.trim()) return
-socket.emit("msg",chatInput.value)
-chatInput.value=""
+camBtn.onclick=()=>{
+cam=!cam
+stream.getVideoTracks()[0].enabled=cam
 }
-
-socket.on("msg",m=>{
-const d=document.createElement("div")
-d.innerHTML="<b>"+m.id+"</b>: "+m.text
-chatMessages.appendChild(d)
-chatMessages.scrollTop=chatMessages.scrollHeight
-})
 
 </script>
 
@@ -287,46 +348,28 @@ chatMessages.scrollTop=chatMessages.scrollHeight
 </html>
 
 `)
-})
-
-io.on("connection",(socket)=>{
-
-socket.on("join",(room)=>{
-
-socket.join(room)
-socket.room=room
-
-if(!rooms[room]) rooms[room]=[]
-
-rooms[room].push(socket.id)
-
-socket.to(room).emit("new",socket.id)
 
 })
 
-socket.on("msg",(text)=>{
+io.on("connection",socket=>{
 
-if(!socket.room) return
+socket.on("join",data=>{
 
-io.to(socket.room).emit("msg",{
-id:socket.id.slice(0,5),
-text
-})
+socket.room=data.room
+socket.name=data.name
+
+socket.join(data.room)
+
+socket.to(data.room).emit("user",{id:socket.id,name:data.name})
 
 })
 
 socket.on("disconnect",()=>{
 
-if(!socket.room) return
-
-socket.to(socket.room).emit("remove",socket.id)
-
-rooms[socket.room]=rooms[socket.room].filter(id=>id!==socket.id)
+socket.to(socket.room).emit("leave",socket.id)
 
 })
 
 })
 
-server.listen(3000,()=>{
-console.log("server running on http://localhost:3000")
-})
+server.listen(3000,()=>console.log("server running"))
