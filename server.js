@@ -18,13 +18,12 @@ return Math.random().toString(36).slice(2,8).toUpperCase()
 
 app.get("/",(req,res)=>{
 
+res.sendapp.get("/", (req, res) => {
 res.send(`
-
 <!DOCTYPE html>
 <html>
 <head>
 <title>Lobby</title>
-
 <style>
 
 body{
@@ -40,20 +39,21 @@ flex-direction:column
 
 input{
 padding:12px;
+border-radius:10px;
 border:none;
-border-radius:8px;
 background:#1b1b1b;
 color:white;
-font-size:16px
+font-size:16px;
+width:200px
 }
 
 button{
-margin-top:10px;
+margin-top:12px;
 padding:10px 20px;
+border-radius:10px;
 border:none;
 background:#2e2e2e;
 color:white;
-border-radius:8px;
 cursor:pointer
 }
 
@@ -62,28 +62,31 @@ background:#444
 }
 
 </style>
-
 </head>
 
 <body>
 
 <h2>Join or Create Room</h2>
 
-<input id="code" placeholder="Enter room code (optional)">
-
-<button onclick="joinRoom()">Join</button>
+<input id="roomCode" placeholder="Room code (optional)">
+<br>
+<button onclick="joinRoom()">Join Room</button>
 
 <script>
 
-function joinRoom(){
-
-let code=document.getElementById("code").value.trim()
-
-if(!code){
-code=Math.random().toString(36).slice(2,8).toUpperCase()
+function randomCode(){
+return Math.random().toString(36).substring(2,8).toUpperCase()
 }
 
-location.href="/room/"+code
+function joinRoom(){
+
+let code=document.getElementById("roomCode").value.trim()
+
+if(code===""){
+code=randomCode()
+}
+
+window.location.href="/room/"+code
 
 }
 
@@ -91,7 +94,6 @@ location.href="/room/"+code
 
 </body>
 </html>
-
 `)
 })
 
