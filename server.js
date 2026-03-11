@@ -1,64 +1,56 @@
 const express = require("express")
 const http = require("http")
-const { Server } = require("socket.io")
+const {Server} = require("socket.io")
 
 const app = express()
 const server = http.createServer(app)
 
-const io = new Server(server,{
-maxHttpBufferSize:25*1024*1024,
-cors:{origin:"*"}
-})
+const io = new Server(server)
 
-const rooms={}
+const rooms = {}
 
 function randomCode(){
-return Math.random().toString(36).slice(2,8).toUpperCase()
+    return Math.random().toString(36).substring(2,8).toUpperCase()
 }
 
 app.get("/",(req,res)=>{
-
-res.sendapp.get("/", (req, res) => {
 res.send(`
+
 <!DOCTYPE html>
 <html>
 <head>
 <title>Lobby</title>
+
 <style>
 
 body{
-background:#0f0f0f;
+background:#111;
 color:white;
-font-family:Arial;
-height:100vh;
+font-family:sans-serif;
 display:flex;
+flex-direction:column;
 align-items:center;
 justify-content:center;
-flex-direction:column
+height:100vh
 }
 
 input{
-padding:12px;
-border-radius:10px;
+padding:10px;
+border-radius:8px;
 border:none;
-background:#1b1b1b;
-color:white;
-font-size:16px;
-width:200px
+margin-top:10px;
+background:#222;
+color:white
 }
 
 button{
-margin-top:12px;
 padding:10px 20px;
-border-radius:10px;
+margin-top:10px;
 border:none;
-background:#2e2e2e;
+border-radius:8px;
+background:#444;
 color:white;
 cursor:pointer
-}
-
-button:hover{
-background:#444
 }
 
 </style>
@@ -66,11 +58,11 @@ background:#444
 
 <body>
 
-<h2>Join or Create Room</h2>
+<h2>Join Room</h2>
 
-<input id="roomCode" placeholder="Room code (optional)">
-<br>
-<button onclick="joinRoom()">Join Room</button>
+<input id="code" placeholder="room code optional">
+
+<button onclick="join()">Join</button>
 
 <script>
 
@@ -78,15 +70,15 @@ function randomCode(){
 return Math.random().toString(36).substring(2,8).toUpperCase()
 }
 
-function joinRoom(){
+function join(){
 
-let code=document.getElementById("roomCode").value.trim()
+let code=document.getElementById("code").value.trim()
 
 if(code===""){
 code=randomCode()
 }
 
-window.location.href="/room/"+code
+window.location="/room/"+code
 
 }
 
@@ -94,12 +86,13 @@ window.location.href="/room/"+code
 
 </body>
 </html>
+
 `)
 })
 
 app.get("/room/:id",(req,res)=>{
 
-const id=req.params.id.toUpperCase()
+const room = req.params.id
 
 res.send(`
 
@@ -107,59 +100,37 @@ res.send(`
 <html>
 <head>
 
-<meta charset="UTF-8">
-<title>Room ${id}</title>
+<title>Room ${room}</title>
 
 <style>
 
 body{
-background:#0f0f0f;
+background:#111;
 color:white;
-font-family:Arial;
-height:100vh;
+margin:0;
+font-family:sans-serif;
 display:flex;
 flex-direction:column;
-overflow:hidden
+height:100vh
 }
 
-#videoGrid{
+#videos{
 flex:1;
 display:flex;
 flex-wrap:wrap;
-gap:8px;
-padding:8px;
+gap:10px;
+padding:10px;
 justify-content:center
 }
 
-.participant{
-background:#222;
-border-radius:8px;
-padding:4px;
-width:200px
-}
-
 video{
-width:100%;
-border-radius:6px
+width:300px;
+background:black;
+border-radius:10px
 }
 
-#bottomBar{
-display:flex;
-gap:6px;
-padding:8px;
-background:#141414
-}
-
-button{
-background:#111;
-border:none;
-color:white;
-padding:8px;
-border-radius:6px;
-cursor:pointer
-}
-
-button:hover{
+#controls{
+padding:10px;
 background:#222
 }
 
@@ -169,60 +140,59 @@ background:#222
 
 <body>
 
-<div id="videoGrid"></div>
+<div id="videos"></div>
 
-<div id="bottomBar">
-<button id="muteBtn">Mic</button>
-<button id="camBtn">Cam</button>
-<button onclick="location.href='/'">Leave</button>
+<div id="controls">
+Room: ${room}
+<button onclick="leave()">Leave</button>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
 
-const socket=io()
-const room="${id}"
+const socket = io()
 
-let localStream
+const room="${room}"
+
 const peers={}
-const grid=document.getElementById("videoGrid")
+const videos=document.getElementById("videos")
 
-function addVideo(id,stream){
+let stream
 
-if(document.getElementById("p_"+id)) return
+navigator.mediaDevices.getUserMedia({video:true,audio:true}).then(s=>{
 
-const div=document.createElement("div")
-div.className="participant"
-div.id="p_"+id
+stream=s
+
+addVideo("me",stream,true)
+
+socket.emit("join",room)
+
+})
+
+function addVideo(id,stream,muted=false){
+
+if(document.getElementById(id)) return
 
 const v=document.createElement("video")
+
+v.id=id
+v.srcObject=stream
 v.autoplay=true
+v.muted=muted
 v.playsInline=true
 
-if(id==="local") v.muted=true
-
-v.srcObject=stream
-
-div.appendChild(v)
-
-grid.appendChild(div)
+videos.appendChild(v)
 
 }
 
 function createPeer(id){
 
 const pc=new RTCPeerConnection({
-iceServers:[
-{urls:"stun:stun.l.google.com:19302"}
-]
+iceServers:[{urls:"stun:stun.l.google.com:19302"}]
 })
 
-peers[id]=pc
-
-localStream.getTracks().forEach(t=>{
-pc.addTrack(t,localStream)
-})
+stream.getTracks().forEach(t=>pc.addTrack(t,stream))
 
 pc.ontrack=e=>{
 addVideo(id,e.streams[0])
@@ -230,28 +200,19 @@ addVideo(id,e.streams[0])
 
 pc.onicecandidate=e=>{
 if(e.candidate){
-socket.emit("ice",{to:id,c:e.candidate})
+socket.emit("ice",{to:id,candidate:e.candidate})
 }
 }
+
+peers[id]=pc
 
 return pc
 
 }
 
-navigator.mediaDevices.getUserMedia({
-video:true,
-audio:true
-}).then(stream=>{
+socket.on("users",users=>{
 
-localStream=stream
-
-addVideo("local",stream)
-
-socket.emit("join",{room})
-
-})
-
-socket.on("new",async id=>{
+users.forEach(async id=>{
 
 const pc=createPeer(id)
 
@@ -259,35 +220,42 @@ const offer=await pc.createOffer()
 
 await pc.setLocalDescription(offer)
 
-socket.emit("offer",{to:id,o:offer})
+socket.emit("offer",{to:id,offer})
 
 })
 
-socket.on("offer",async d=>{
+})
 
-const pc=createPeer(d.from)
+socket.on("offer",async data=>{
 
-await pc.setRemoteDescription(d.o)
+const pc=createPeer(data.from)
+
+await pc.setRemoteDescription(data.offer)
 
 const answer=await pc.createAnswer()
 
 await pc.setLocalDescription(answer)
 
-socket.emit("answer",{to:d.from,a:answer})
+socket.emit("answer",{to:data.from,answer})
 
 })
 
-socket.on("answer",d=>{
-peers[d.from]?.setRemoteDescription(d.a)
+socket.on("answer",data=>{
+peers[data.from]?.setRemoteDescription(data.answer)
 })
 
-socket.on("ice",d=>{
-peers[d.from]?.addIceCandidate(d.c)
+socket.on("ice",data=>{
+peers[data.from]?.addIceCandidate(data.candidate)
 })
 
-socket.on("remove",id=>{
-document.getElementById("p_"+id)?.remove()
+socket.on("user-left",id=>{
+document.getElementById(id)?.remove()
+delete peers[id]
 })
+
+function leave(){
+location.href="/"
+}
 
 </script>
 
@@ -295,47 +263,40 @@ document.getElementById("p_"+id)?.remove()
 </html>
 
 `)
-
 })
 
 io.on("connection",socket=>{
 
-socket.on("join",({room})=>{
+socket.on("join",room=>{
 
 socket.join(room)
 
-if(!rooms[room]){
-rooms[room]={users:[]}
-}
+const clients=[...io.sockets.adapter.rooms.get(room)||[]]
 
-rooms[room].users.push(socket.id)
+socket.emit("users",clients.filter(id=>id!==socket.id))
 
-socket.to(room).emit("new",socket.id)
+socket.to(room).emit("offer-request",socket.id)
+
+socket.room=room
 
 })
 
-socket.on("offer",d=>{
-socket.to(d.to).emit("offer",{from:socket.id,o:d.o})
+socket.on("offer",data=>{
+io.to(data.to).emit("offer",{from:socket.id,offer:data.offer})
 })
 
-socket.on("answer",d=>{
-socket.to(d.to).emit("answer",{from:socket.id,a:d.a})
+socket.on("answer",data=>{
+io.to(data.to).emit("answer",{from:socket.id,answer:data.answer})
 })
 
-socket.on("ice",d=>{
-socket.to(d.to).emit("ice",{from:socket.id,c:d.c})
+socket.on("ice",data=>{
+io.to(data.to).emit("ice",{from:socket.id,candidate:data.candidate})
 })
 
 socket.on("disconnect",()=>{
 
-for(const r in rooms){
-
-rooms[r].users=rooms[r].users.filter(u=>u!==socket.id)
-
-socket.to(r).emit("remove",socket.id)
-
-if(!rooms[r].users.length) delete rooms[r]
-
+if(socket.room){
+socket.to(socket.room).emit("user-left",socket.id)
 }
 
 })
@@ -343,5 +304,5 @@ if(!rooms[r].users.length) delete rooms[r]
 })
 
 server.listen(3000,()=>{
-console.log("Server running on port 3000")
+console.log("running on http://localhost:3000")
 })
