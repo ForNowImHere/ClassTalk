@@ -1,19 +1,14 @@
 const express = require("express")
 const http = require("http")
-const {Server} = require("socket.io")
+const { Server } = require("socket.io")
 
 const app = express()
 const server = http.createServer(app)
-
 const io = new Server(server)
 
 const rooms = {}
 
-function randomCode(){
-    return Math.random().toString(36).substring(2,8).toUpperCase()
-}
-
-app.get("/",(req,res)=>{
+app.get("/", (req,res)=>{
 res.send(`
 
 <!DOCTYPE html>
@@ -24,33 +19,44 @@ res.send(`
 <style>
 
 body{
-background:#111;
+background:#0f0f0f;
 color:white;
-font-family:sans-serif;
+font-family:Arial;
+height:100vh;
+display:flex;
+align-items:center;
+justify-content:center
+}
+
+#box{
+background:#1b1b1b;
+padding:40px;
+border-radius:20px;
 display:flex;
 flex-direction:column;
-align-items:center;
-justify-content:center;
-height:100vh
+gap:10px;
+width:300px
 }
 
 input{
 padding:10px;
-border-radius:8px;
+border-radius:10px;
 border:none;
-margin-top:10px;
-background:#222;
+background:#111;
 color:white
 }
 
 button{
-padding:10px 20px;
-margin-top:10px;
+padding:10px;
+border-radius:10px;
 border:none;
-border-radius:8px;
-background:#444;
+background:#222;
 color:white;
 cursor:pointer
+}
+
+button:hover{
+background:#333
 }
 
 </style>
@@ -58,28 +64,31 @@ cursor:pointer
 
 <body>
 
+<div id="box">
+
 <h2>Join Room</h2>
 
-<input id="code" placeholder="room code optional">
+<input id="code" placeholder="Room Code">
 
-<button onclick="join()">Join</button>
+<button onclick="join()">Join / Create</button>
+
+<button onclick="random()">Random Room</button>
+
+</div>
 
 <script>
 
-function randomCode(){
-return Math.random().toString(36).substring(2,8).toUpperCase()
-}
-
 function join(){
-
 let code=document.getElementById("code").value.trim()
 
-if(code===""){
-code=randomCode()
+if(!code) code=Math.random().toString(36).substring(2,7)
+
+location.href="/room/"+code
 }
 
-window.location="/room/"+code
-
+function random(){
+let code=Math.random().toString(36).substring(2,7)
+location.href="/room/"+code
 }
 
 </script>
@@ -89,10 +98,6 @@ window.location="/room/"+code
 
 `)
 })
-
-app.get("/room/:id",(req,res)=>{
-
-const room = req.params.id
 
 app.get("/room/:id",(req,res)=>{
 
@@ -130,32 +135,26 @@ justify-content:center
 
 .participant{
 background:#222;
-border-radius:8px;
-padding:4px;
-width:200px;
-position:relative;
-transition:0.2s
+border-radius:12px;
+padding:6px;
+width:220px
 }
 
 .participant video{
 width:100%;
-border-radius:6px
+border-radius:8px
 }
 
 .name-label{
 text-align:center;
 font-size:0.9em;
-margin-top:3px
-}
-
-.speaking{
-box-shadow:0 0 12px lime
+margin-top:4px
 }
 
 #bottomBar{
 display:flex;
-gap:6px;
-padding:8px;
+gap:8px;
+padding:10px;
 background:#141414
 }
 
@@ -163,8 +162,8 @@ button{
 background:#111;
 border:none;
 color:white;
-padding:8px;
-border-radius:6px;
+padding:10px;
+border-radius:10px;
 cursor:pointer
 }
 
@@ -172,22 +171,14 @@ button:hover{
 background:#222
 }
 
-input{
-background:#111;
-border:none;
-color:white;
-padding:6px;
-border-radius:6px
-}
-
 #chatOverlay{
 position:absolute;
-bottom:70px;
+bottom:80px;
 right:10px;
-width:520px;
-height:420px;
+width:420px;
+height:320px;
 background:#222;
-border-radius:10px;
+border-radius:14px;
 display:none;
 flex-direction:column
 }
@@ -202,8 +193,7 @@ cursor:pointer
 #chatMessages{
 flex:1;
 padding:8px;
-overflow:auto;
-font-size:0.9em
+overflow:auto
 }
 
 #chatInputBar{
@@ -238,10 +228,9 @@ flex:1
 
 <div id="bottomBar">
 
-<button id="muteBtn">Mic ON</button>
-<button id="camBtn">Cam ON</button>
-<button id="screenBtn">Share Screen</button>
-<button id="deafenBtn">Hear ON</button>
+<button id="muteBtn">Mic</button>
+<button id="camBtn">Cam</button>
+<button id="screenBtn">Screen</button>
 <button id="chatToggle">Chat</button>
 <button id="leaveBtn">Leave</button>
 
@@ -251,10 +240,46 @@ flex:1
 
 <script>
 
-const socket = io();
-const room = "${req.params.id}";
+const socket = io()
+const room = "${req.params.id}"
 
-/* your existing JS continues here */
+socket.emit("join",room)
+
+const chat=document.getElementById("chatOverlay")
+
+document.getElementById("chatToggle").onclick=()=>{
+chat.style.display="flex"
+}
+
+document.getElementById("chatHeader").onclick=()=>{
+chat.style.display="none"
+}
+
+document.getElementById("leaveBtn").onclick=()=>{
+location.href="/"
+}
+
+const chatInput=document.getElementById("chatInput")
+const chatMessages=document.getElementById("chatMessages")
+
+document.getElementById("chatSend").onclick=send
+
+chatInput.onkeydown=e=>{
+if(e.key==="Enter") send()
+}
+
+function send(){
+if(!chatInput.value.trim()) return
+socket.emit("msg",chatInput.value)
+chatInput.value=""
+}
+
+socket.on("msg",m=>{
+const d=document.createElement("div")
+d.innerHTML="<b>"+m.id+"</b>: "+m.text
+chatMessages.appendChild(d)
+chatMessages.scrollTop=chatMessages.scrollHeight
+})
 
 </script>
 
@@ -264,44 +289,44 @@ const room = "${req.params.id}";
 `)
 })
 
-io.on("connection",socket=>{
+io.on("connection",(socket)=>{
 
-socket.on("join",room=>{
+socket.on("join",(room)=>{
 
 socket.join(room)
-
-const clients=[...io.sockets.adapter.rooms.get(room)||[]]
-
-socket.emit("users",clients.filter(id=>id!==socket.id))
-
-socket.to(room).emit("offer-request",socket.id)
-
 socket.room=room
 
+if(!rooms[room]) rooms[room]=[]
+
+rooms[room].push(socket.id)
+
+socket.to(room).emit("new",socket.id)
+
 })
 
-socket.on("offer",data=>{
-io.to(data.to).emit("offer",{from:socket.id,offer:data.offer})
+socket.on("msg",(text)=>{
+
+if(!socket.room) return
+
+io.to(socket.room).emit("msg",{
+id:socket.id.slice(0,5),
+text
 })
 
-socket.on("answer",data=>{
-io.to(data.to).emit("answer",{from:socket.id,answer:data.answer})
-})
-
-socket.on("ice",data=>{
-io.to(data.to).emit("ice",{from:socket.id,candidate:data.candidate})
 })
 
 socket.on("disconnect",()=>{
 
-if(socket.room){
-socket.to(socket.room).emit("user-left",socket.id)
-}
+if(!socket.room) return
+
+socket.to(socket.room).emit("remove",socket.id)
+
+rooms[socket.room]=rooms[socket.room].filter(id=>id!==socket.id)
 
 })
 
 })
 
 server.listen(3000,()=>{
-console.log("running on http://localhost:3000")
+console.log("server running on http://localhost:3000")
 })
