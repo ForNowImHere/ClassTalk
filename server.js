@@ -6,7 +6,7 @@ const app = express()
 const server = http.createServer(app)
 const io = new Server(server)
 
-const users = {}
+const rooms = {}
 
 app.get("/", (req,res)=>{
 
@@ -14,6 +14,7 @@ res.send(`
 <!DOCTYPE html>
 <html>
 <head>
+
 <title>Join Room</title>
 
 <style>
@@ -25,12 +26,13 @@ font-family:Arial;
 display:flex;
 align-items:center;
 justify-content:center;
-height:100vh
+height:100vh;
+margin:0
 }
 
 #box{
-background:#1b1b1b;
-padding:40px;
+background:#1a1a1a;
+padding:30px;
 border-radius:20px;
 display:flex;
 flex-direction:column;
@@ -57,11 +59,12 @@ cursor:pointer
 
 video{
 width:100%;
-border-radius:12px;
+border-radius:10px;
 background:black
 }
 
 </style>
+
 </head>
 
 <body>
@@ -72,7 +75,7 @@ background:black
 
 <input id="name" placeholder="Your name">
 
-<input id="room" placeholder="Room code">
+<input id="room" placeholder="Room code (optional)">
 
 <select id="mic"></select>
 <select id="cam"></select>
@@ -91,28 +94,32 @@ async function init(){
 
 const devices = await navigator.mediaDevices.enumerateDevices()
 
-const micSel = document.getElementById("mic")
-const camSel = document.getElementById("cam")
+const mic=document.getElementById("mic")
+const cam=document.getElementById("cam")
 
 devices.forEach(d=>{
+
 if(d.kind==="audioinput"){
-const o=document.createElement("option")
+let o=document.createElement("option")
 o.value=d.deviceId
 o.text=d.label || "Mic"
-micSel.appendChild(o)
+mic.appendChild(o)
 }
+
 if(d.kind==="videoinput"){
-const o=document.createElement("option")
+let o=document.createElement("option")
 o.value=d.deviceId
 o.text=d.label || "Camera"
-camSel.appendChild(o)
+cam.appendChild(o)
 }
+
 })
 
 startPreview()
 
-micSel.onchange=startPreview
-camSel.onchange=startPreview
+mic.onchange=startPreview
+cam.onchange=startPreview
+
 }
 
 async function startPreview(){
@@ -125,11 +132,12 @@ video:{deviceId:cam.value}
 })
 
 preview.srcObject=stream
+
 }
 
 function join(){
 
-const name=document.getElementById("name").value.trim()
+let name=document.getElementById("name").value.trim()
 let room=document.getElementById("room").value.trim()
 
 if(!name) return alert("enter name")
@@ -137,6 +145,7 @@ if(!name) return alert("enter name")
 if(!room) room=Math.random().toString(36).slice(2,7)
 
 location.href="/room/"+room+"?name="+encodeURIComponent(name)
+
 }
 
 init()
@@ -179,28 +188,26 @@ justify-content:center
 }
 
 .user{
-background:#1f1f1f;
+background:#1b1b1b;
 border-radius:16px;
 padding:6px;
 width:220px;
-text-align:center;
-position:relative
+text-align:center
 }
 
 .user video{
 width:100%;
-border-radius:12px
+border-radius:10px
 }
 
 .avatar{
-width:100%;
 height:120px;
-border-radius:12px;
 display:flex;
 align-items:center;
 justify-content:center;
-font-size:50px;
-background:#333
+font-size:40px;
+background:#333;
+border-radius:10px
 }
 
 .name{
@@ -212,10 +219,10 @@ box-shadow:0 0 15px lime
 }
 
 #bar{
-display:flex;
-gap:10px;
+background:#141414;
 padding:10px;
-background:#141414
+display:flex;
+gap:10px
 }
 
 button{
@@ -226,6 +233,24 @@ background:#222;
 color:white
 }
 
+#chat{
+position:absolute;
+right:10px;
+bottom:70px;
+width:300px;
+height:300px;
+background:#222;
+border-radius:12px;
+display:none;
+flex-direction:column
+}
+
+#msgs{
+flex:1;
+overflow:auto;
+padding:5px
+}
+
 </style>
 
 </head>
@@ -234,11 +259,17 @@ color:white
 
 <div id="grid"></div>
 
+<div id="chat">
+<div id="msgs"></div>
+<input id="chatInput">
+</div>
+
 <div id="bar">
 
-<button id="micBtn">Mic</button>
-<button id="camBtn">Cam</button>
-<button id="leave">Leave</button>
+<button id="mic">Mic</button>
+<button id="cam">Cam</button>
+<button id="chatBtn">Chat</button>
+<button onclick="location.href='/'">Leave</button>
 
 </div>
 
@@ -247,28 +278,24 @@ color:white
 <script>
 
 const socket = io()
-
 const url=new URL(location.href)
+
 const name=url.searchParams.get("name")
-
 const room="${req.params.id}"
-
-socket.emit("join",{room,name})
-
-const grid=document.getElementById("grid")
 
 const peers={}
 const users={}
+const grid=document.getElementById("grid")
 
 let stream
 
-navigator.mediaDevices.getUserMedia({video:true,audio:true})
-.then(s=>{
+navigator.mediaDevices.getUserMedia({video:true,audio:true}).then(s=>{
 
 stream=s
+
 addUser("self",name,s)
 
-socket.emit("ready")
+socket.emit("join",{room,name})
 
 })
 
@@ -278,34 +305,18 @@ if(users[id]) return
 
 const div=document.createElement("div")
 div.className="user"
-div.id=id
 
-let vid
-
-if(stream){
-
-vid=document.createElement("video")
+let vid=document.createElement("video")
 vid.srcObject=stream
 vid.autoplay=true
 vid.playsInline=true
 
+const label=document.createElement("div")
+label.className="name"
+label.textContent=name
+
 div.appendChild(vid)
-
-}else{
-
-const a=document.createElement("div")
-a.className="avatar"
-a.textContent=name[0].toUpperCase()
-
-div.appendChild(a)
-
-}
-
-const n=document.createElement("div")
-n.className="name"
-n.textContent=name
-
-div.appendChild(n)
+div.appendChild(label)
 
 grid.appendChild(div)
 
@@ -313,34 +324,98 @@ users[id]=div
 
 }
 
-socket.on("user",u=>{
-addUser(u.id,u.name)
+function createPeer(id,init){
+
+const pc=new RTCPeerConnection({
+iceServers:[{urls:"stun:stun.l.google.com:19302"}]
 })
 
-socket.on("leave",id=>{
-users[id]?.remove()
-delete users[id]
+peers[id]=pc
+
+stream.getTracks().forEach(t=>pc.addTrack(t,stream))
+
+pc.ontrack=e=>{
+
+addUser(id,id,e.streams[0])
+
+}
+
+pc.onicecandidate=e=>{
+if(e.candidate){
+socket.emit("ice",{to:id,c:e.candidate})
+}
+}
+
+if(init){
+
+pc.createOffer()
+.then(o=>pc.setLocalDescription(o))
+.then(()=>{
+socket.emit("offer",{to:id,o:pc.localDescription})
 })
 
-document.getElementById("leave").onclick=()=>{
-location.href="/"
 }
 
-const micBtn=document.getElementById("micBtn")
-const camBtn=document.getElementById("camBtn")
+return pc
 
-let mic=true
-let cam=true
-
-micBtn.onclick=()=>{
-mic=!mic
-stream.getAudioTracks()[0].enabled=mic
 }
 
-camBtn.onclick=()=>{
-cam=!cam
-stream.getVideoTracks()[0].enabled=cam
+socket.on("users",list=>{
+list.forEach(id=>createPeer(id,true))
+})
+
+socket.on("new",id=>{
+createPeer(id,false)
+})
+
+socket.on("offer",async d=>{
+
+const pc=createPeer(d.from,false)
+
+await pc.setRemoteDescription(d.o)
+
+const ans=await pc.createAnswer()
+
+await pc.setLocalDescription(ans)
+
+socket.emit("answer",{to:d.from,a:ans})
+
+})
+
+socket.on("answer",d=>{
+peers[d.from].setRemoteDescription(d.a)
+})
+
+socket.on("ice",d=>{
+peers[d.from].addIceCandidate(d.c)
+})
+
+document.getElementById("mic").onclick=()=>{
+let t=stream.getAudioTracks()[0]
+t.enabled=!t.enabled
 }
+
+document.getElementById("cam").onclick=()=>{
+let t=stream.getVideoTracks()[0]
+t.enabled=!t.enabled
+}
+
+document.getElementById("chatBtn").onclick=()=>{
+chat.style.display=chat.style.display==="flex"?"none":"flex"
+}
+
+chatInput.onkeydown=e=>{
+if(e.key==="Enter"){
+socket.emit("msg",chatInput.value)
+chatInput.value=""
+}
+}
+
+socket.on("msg",m=>{
+let d=document.createElement("div")
+d.textContent=m
+msgs.appendChild(d)
+})
 
 </script>
 
@@ -356,20 +431,44 @@ io.on("connection",socket=>{
 socket.on("join",data=>{
 
 socket.room=data.room
-socket.name=data.name
-
 socket.join(data.room)
 
-socket.to(data.room).emit("user",{id:socket.id,name:data.name})
+if(!rooms[data.room]) rooms[data.room]=[]
 
+socket.emit("users",rooms[data.room])
+
+rooms[data.room].forEach(id=>{
+io.to(id).emit("new",socket.id)
+})
+
+rooms[data.room].push(socket.id)
+
+})
+
+socket.on("offer",d=>{
+io.to(d.to).emit("offer",{from:socket.id,o:d.o})
+})
+
+socket.on("answer",d=>{
+io.to(d.to).emit("answer",{from:socket.id,a:d.a})
+})
+
+socket.on("ice",d=>{
+io.to(d.to).emit("ice",{from:socket.id,c:d.c})
+})
+
+socket.on("msg",m=>{
+io.to(socket.room).emit("msg",m)
 })
 
 socket.on("disconnect",()=>{
 
-socket.to(socket.room).emit("leave",socket.id)
+if(!socket.room) return
+
+rooms[socket.room]=rooms[socket.room].filter(i=>i!==socket.id)
 
 })
 
 })
 
-server.listen(3000,()=>console.log("server running"))
+server.listen(3000,()=>console.log("running on http://localhost:3000"))
